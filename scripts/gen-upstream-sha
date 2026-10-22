@@ -1,0 +1,8 @@
+#!/bin/bash
+# Writes share/upstream.sha256 from the upstream/ snapshot, keyed by the
+# installed paths in upstream/MAP, for omarchy-mu-check-upstream.
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")/.."
+grep -v '^#' upstream/MAP | while IFS=$'\t' read -r snap installed _; do
+  printf '%s  %s\n' "$(sha256sum "upstream/$snap" | cut -d' ' -f1)" "${installed#/}"
+done >share/upstream.sha256

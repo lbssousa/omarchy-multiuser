@@ -1,0 +1,14 @@
+# <snapshot in upstream/>	<installed Omarchy file>	<fork in this repository>
+bin/omarchy-setup-security-fido2	/usr/share/omarchy/bin/omarchy-setup-security-fido2	bin/omarchy-mu-setup-security-fido2
+bin/omarchy-remove-security-fido2	/usr/share/omarchy/bin/omarchy-remove-security-fido2	bin/omarchy-mu-remove-security-fido2
+bin/omarchy-setup-security-fingerprint	/usr/share/omarchy/bin/omarchy-setup-security-fingerprint	bin/omarchy-mu-setup-security-fingerprint
+bin/omarchy-remove-security-fingerprint	/usr/share/omarchy/bin/omarchy-remove-security-fingerprint	bin/omarchy-mu-remove-security-fingerprint
+bin/omarchy-apply-lock	/usr/share/omarchy/bin/omarchy-apply-lock	bin/omarchy-mu-apply-lock
+bin/omarchy-migrate	/usr/share/omarchy/bin/omarchy-migrate	bin/omarchy-mu-migrate
+bin/omarchy-migrate-notify	/usr/share/omarchy/bin/omarchy-migrate-notify	bin/omarchy-mu-migrate-notify
+bin/omarchy-update	/usr/share/omarchy/bin/omarchy-update	bin/omarchy-mu-update
+bin/omarchy-provision-owner	/usr/share/omarchy/bin/omarchy-provision-owner	bin/omarchy-mu-user-add
+bin/omarchy-plymouth-set	/usr/share/omarchy/bin/omarchy-plymouth-set	bin/omarchy-mu-sddm-sync
+sddm/omarchy/Main.qml	/usr/share/omarchy/default/sddm/omarchy/Main.qml	sddm/omarchy-multiuser/Main.qml
+default/omarchy/omarchy-menu.jsonc	/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc	share/menu-block.jsonc
+install/user/first-run/setup-fingerprint.hook	/usr/share/omarchy/install/user/first-run/setup-fingerprint.hook	bin/omarchy-mu-login
