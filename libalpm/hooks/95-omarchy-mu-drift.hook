@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = omarchy
+Target = omarchy-settings
+
+[Action]
+Description = Checking Omarchy files the multi-user forks are based on...
+When = PostTransaction
+Exec = /usr/bin/omarchy-mu-check-upstream
