@@ -1,0 +1,55 @@
+# Maintainer: Laércio de Sousa <laercio@sivali.sousa.nom.br>
+#
+# Builds from the repository this PKGBUILD lives in (the parent of
+# $startdir), so `makepkg` in packaging/ packages the working tree as is.
+
+pkgname=omarchy-multiuser
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Several users on one Omarchy machine: a greeter listing them, per-user FIDO2/fingerprint, migrations for non-admins'
+arch=(any)
+url='https://github.com/lbssousa/omarchy-multiuser'
+license=(MIT)
+depends=(omarchy omarchy-settings sddm qt6-declarative imagemagick sudo jq gum)
+optdepends=('pam-u2f: FIDO2 keys for sudo and polkit'
+            'fprintd: fingerprints for sudo, polkit and the lock screen'
+            'cryptsetup: per-user disk unlock passwords')
+checkdepends=(nodejs fakeroot)
+backup=(etc/sddm.conf.d/zz-omarchy-multiuser.conf)
+install=omarchy-multiuser.install
+
+_srcroot() { cd "$startdir/.."; }
+
+check() {
+  _srcroot
+  visudo -cf etc/sudoers.d/omarchy-multiuser
+  node --test tests/js/
+  for t in tests/sh/*.test.sh; do "$t"; done
+}
+
+package() {
+  _srcroot
+  local f
+  for f in bin/*; do
+    install -Dm755 "$f" "$pkgdir/usr/bin/${f#bin/}"
+  done
+  install -Dm644 -t "$pkgdir/usr/lib/omarchy-multiuser" lib/omarchy-multiuser/*.sh
+  install -Dm644 -t "$pkgdir/usr/share/omarchy-multiuser" share/*
+
+  local theme=usr/share/sddm/themes/omarchy-multiuser
+  install -Dm644 -t "$pkgdir/$theme" sddm/omarchy-multiuser/{Main.qml,UserList.js,Strings.js,theme.conf,metadata.desktop}
+  install -Dm644 -t "$pkgdir/$theme/fallback" sddm/omarchy-multiuser/fallback/*.png
+
+  install -Dm644 -t "$pkgdir/etc/sddm.conf.d" etc/sddm.conf.d/zz-omarchy-multiuser.conf
+  install -Dm440 -t "$pkgdir/etc/sudoers.d" etc/sudoers.d/omarchy-multiuser
+  install -Dm644 -t "$pkgdir/usr/lib/sysusers.d" sysusers.d/omarchy-multiuser.conf
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/system" systemd/system/*
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/user" systemd/user/*.service
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/user/omarchy-migrate-notify.service.d" \
+    systemd/user/omarchy-migrate-notify.service.d/*.conf
+  install -Dm644 -t "$pkgdir/usr/share/libalpm/hooks" libalpm/hooks/*.hook
+  install -dm755 "$pkgdir/var/lib/omarchy-multiuser/migrations"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

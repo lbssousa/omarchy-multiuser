@@ -1,0 +1,23 @@
+post_install() {
+  systemd-sysusers omarchy-multiuser.conf
+  /usr/bin/omarchy-mu-sddm-sync || true
+  echo ":: Enable the watchers and the per-login unit (omarchy-setup does this):"
+  echo "   systemctl enable --now omarchy-mu-sddm-guard.path omarchy-mu-sddm-sync.path omarchy-mu-apply-lock.path"
+  echo "   systemctl enable --now omarchy-mu-migrate-record@<admin>.path   # per administrator"
+  echo "   systemctl --global enable omarchy-mu-login.service"
+  echo ":: Add users to the omarchy-users group; the greeter changes at the next login screen."
+}
+
+post_upgrade() {
+  /usr/bin/omarchy-mu-sddm-sync || true
+}
+
+pre_remove() {
+  rm -f /usr/share/sddm/themes/omarchy-multiuser/theme.conf.user
+  systemctl --global disable omarchy-mu-login.service >/dev/null 2>&1 || true
+}
+
+post_remove() {
+  echo ":: SDDM goes back to Omarchy's greeter at the next login screen."
+  echo ":: Autologin stays off; Omarchy's tools turn it back on if you want it."
+}

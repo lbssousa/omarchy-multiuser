@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Dependencies
+        run: |
+          pacman -Syu --noconfirm --needed sddm qt6-declarative nodejs imagemagick fakeroot \
+            sudo shellcheck just git base-devel ttf-jetbrains-mono-nerd
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # fakeroot refuses to run as root, and the tests expect a normal user.
+      - name: Tests
+        run: |
+          useradd -m builder
+          chown -R builder .
+          su builder -c 'just test'
+
+      # For reviewers: what each fork changes in the Omarchy file it is based on.
+      - name: Changes against upstream/
+        run: |
+          {
+            echo '### Changes against `upstream/` (the Omarchy files the forks are based on)'
+            echo '```diff'
+            just diff-base
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
