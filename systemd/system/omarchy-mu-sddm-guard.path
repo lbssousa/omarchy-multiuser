@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch SDDM's configuration for autologin (omarchy-multiuser)
+
+[Path]
+PathExists=/etc/sddm.conf.d/autologin.conf
+PathChanged=/etc/sddm.conf.d
+
+[Install]
+WantedBy=multi-user.target

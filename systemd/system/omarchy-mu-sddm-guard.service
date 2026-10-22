@@ -1,0 +1,7 @@
+[Unit]
+Description=Remove SDDM autologin and check the multi-user greeter (omarchy-multiuser)
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-mu-sddm-guard

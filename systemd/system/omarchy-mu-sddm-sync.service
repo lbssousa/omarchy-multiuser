@@ -1,0 +1,6 @@
+[Unit]
+Description=Copy Style > Unlock colors to the multi-user greeter (omarchy-multiuser)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-mu-sddm-sync

@@ -1,0 +1,13 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = omarchy
+Target = omarchy-settings
+Target = sddm
+Target = omarchy-multiuser
+
+[Action]
+Description = Keeping the multi-user greeter without autologin...
+When = PostTransaction
+Exec = /bin/sh -c '/usr/bin/omarchy-mu-sddm-guard; /usr/bin/omarchy-mu-sddm-sync; exit 0'

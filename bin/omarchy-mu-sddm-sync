@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# omarchy:summary=Copy Style > Unlock's greeter colors to the multi-user greeter
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# omarchy-plymouth-set (Style > Unlock) recolors only the stock theme,
+# /usr/share/sddm/themes/omarchy: it rewrites Main.qml's background color and
+# the PNGs, which are tinted to the theme's text color. The multi-user theme
+# already loads those PNGs from there; this writes the two colors to its
+# theme.conf.user (which SDDM reads over theme.conf):
+#
+#   background  the first `color: "#rrggbb"` in the stock Main.qml
+#   textColor   the center pixel of the stock bullet.png
+#
+# Run by omarchy-mu-sddm-sync.path whenever the stock theme changes, by the
+# pacman hook and on package install. Without ImageMagick or the stock files
+# it leaves theme.conf's defaults alone.
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+stock=$OMU_SDDM_THEMES/omarchy
+ours=$OMU_SDDM_THEMES/$OMU_THEME
+conf=$ours/theme.conf.user
+
+[[ -d $ours ]] || exit 0
+
+background=""
+if [[ -f $stock/Main.qml ]]; then
+  background=$(grep -oEm1 'color: *"#[0-9A-Fa-f]{6}"' "$stock/Main.qml" | grep -oE '#[0-9A-Fa-f]{6}' || true)
+fi
+
+text=""
+if [[ -f $stock/bullet.png ]] && command -v magick >/dev/null; then
+  # The bullet is a filled dot; its center is opaque and exactly the tint.
+  hex=$(magick "$stock/bullet.png" -format '%[hex:p{7,7}]' info: 2>/dev/null || true)
+  [[ $hex =~ ^[0-9A-Fa-f]{6} ]] && text="#${hex:0:6}"
+fi
+
+content="[General]"
+[[ -n $background ]] && content+=$'\n'"background=$background"
+[[ -n $text ]] && content+=$'\n'"textColor=$text"
+
+if [[ $content == "[General]" ]]; then
+  rm -f "$conf"
+  exit 0
+fi
+
+if [[ ! -f $conf || $(<"$conf") != "$content" ]]; then
+  printf '%s\n' "$content" | omu_atomic_write "$conf" 644
+  echo "Greeter colors: background=${background:-default} text=${text:-default}"
+fi

@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch the stock Omarchy greeter for Style > Unlock recolors (omarchy-multiuser)
+
+[Path]
+PathChanged=/usr/share/sddm/themes/omarchy
+
+[Install]
+WantedBy=multi-user.target

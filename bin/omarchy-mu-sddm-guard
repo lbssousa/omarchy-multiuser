@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# omarchy:summary=Keep SDDM showing the multi-user greeter, with no autologin
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# Omarchy logs its single owner in automatically: omarchy-provision-owner and
+# omarchy-upgrade-to-quattro write /etc/sddm.conf.d/autologin.conf, which
+# stays on for good on encrypted installs, and unencrypted ones get a
+# self-deleting omarchy-provision-autologin-once.service. With several users
+# that skips the greeter, so this removes both. The package's
+# zz-omarchy-multiuser.conf (read last, with an empty [Autologin]) already
+# overrides them; this keeps the files from lingering and checks the result.
+#
+# Run by omarchy-mu-sddm-guard.path when /etc/sddm.conf.d changes and by the
+# pacman hook. Never restarts sddm, which would end every open session.
+#
+# Usage: omarchy-mu-sddm-guard [--check]
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+check=false
+[[ ${1:-} == --check ]] && check=true
+problems=0
+
+autologin=$OMU_SDDM_CONF_DIR/autologin.conf
+if [[ -e $autologin || -L $autologin ]]; then
+  if $check; then
+    echo "autologin: $autologin exists" >&2
+    problems=1
+  else
+    rm -f -- "$autologin"
+    echo "Removed $autologin."
+  fi
+fi
+
+once_unit=$OMU_ROOT/etc/systemd/system/omarchy-provision-autologin-once.service
+if [[ -e $once_unit ]] && ! $check; then
+  [[ -n $OMU_ROOT ]] || systemctl disable omarchy-provision-autologin-once.service >/dev/null 2>&1 || true
+  rm -f -- "$once_unit"
+  echo "Removed omarchy-provision-autologin-once.service."
+fi
+
+# SDDM reads /etc/sddm.conf.d/*.conf in name order, then /etc/sddm.conf; the
+# last value of a key wins. Report what the effective theme and autologin
+# user are.
+effective() {
+  local section=$1 key=$2 file value=""
+  local files=("$OMU_SDDM_CONF_DIR"/*.conf "$OMU_ROOT/etc/sddm.conf")
+  for file in "${files[@]}"; do
+    [[ -f $file ]] || continue
+    local v
+    v=$(awk -F= -v s="[$section]" -v k="$key" '
+      /^\[/ { insec = ($0 == s) }
+      insec && $1 == k { sub(/^[^=]*=/, ""); val = $0; found = 1 }
+      END { if (found) print "=" val }' "$file")
+    [[ -n $v ]] && value=${v#=}
+  done
+  printf '%s\n' "$value"
+}
+
+theme=$(effective Theme Current)
+user=$(effective Autologin User)
+
+if [[ $theme != "$OMU_THEME" ]]; then
+  echo "SDDM theme is '${theme:-<default>}', not $OMU_THEME." >&2
+  problems=1
+fi
+if [[ -n $user ]]; then
+  echo "SDDM still logs '$user' in automatically (check /etc/sddm.conf)." >&2
+  problems=1
+fi
+
+exit "$problems"
