@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch fingerprint enrollments and lock screen PAM (omarchy-multiuser)
+
+[Path]
+PathChanged=/var/lib/fprint
+PathChanged=/etc/pam.d
+
+[Install]
+WantedBy=multi-user.target

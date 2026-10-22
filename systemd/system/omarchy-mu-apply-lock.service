@@ -1,0 +1,6 @@
+[Unit]
+Description=Keep fingerprint unlock while any user has prints (omarchy-multiuser)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-mu-apply-lock --quiet

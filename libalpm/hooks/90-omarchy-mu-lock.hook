@@ -1,0 +1,14 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = omarchy
+Target = omarchy-settings
+Target = fprintd
+Target = pam-u2f
+Target = omarchy-multiuser
+
+[Action]
+Description = Keeping fingerprint unlock while any user has prints...
+When = PostTransaction
+Exec = /bin/sh -c '/usr/bin/omarchy-mu-apply-lock --quiet; exit 0'

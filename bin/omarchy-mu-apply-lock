@@ -1,0 +1,112 @@
+#!/bin/bash
+
+# omarchy:summary=Configure lock screen authentication for every user
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# Fork of omarchy-apply-lock (upstream/bin). Upstream keeps or deletes the
+# machine-wide /etc/pam.d/omarchy-lock-fingerprint depending on whether ONE
+# user (the caller) has enrolled prints, so a second user without prints
+# running it turns fingerprint unlock off for everyone. Here the file stays
+# while ANY user has prints under /var/lib/fprint.
+#
+# Takes no arguments that change anything, so the omarchy-users sudoers rule
+# can allow it without a password. omarchy-mu-apply-lock.path reruns it when
+# /var/lib/fprint or /etc/pam.d changes (also undoing an upstream run), and
+# the pacman hook after upgrades.
+#
+# Usage: omarchy-mu-apply-lock [--check] [--quiet]
+#   --check   exit 0 when some user has prints, 1 otherwise; change nothing
+
+set -e
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+check=false
+quiet=false
+for arg in "$@"; do
+  case $arg in
+    --check) check=true ;;
+    --quiet) quiet=true ;;
+    *) omu_die "Usage: omarchy-mu-apply-lock [--check] [--quiet]" ;;
+  esac
+done
+
+say() {
+  $quiet || echo "$@"
+}
+
+if (( EUID != 0 )) && [[ -z $OMU_ROOT ]]; then
+  exec sudo -n "$0" "$@"
+fi
+
+# fprintd keeps prints as /var/lib/fprint/<user>/<device>/<finger>.
+any_user_has_prints() {
+  [[ -d $OMU_FPRINT_DIR ]] &&
+    [[ -n $(find "$OMU_FPRINT_DIR" -mindepth 3 -type f -print -quit 2>/dev/null) ]]
+}
+
+if $check; then
+  any_user_has_prints
+  exit
+fi
+
+OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
+pam_dir=$OMU_PAM_DIR
+
+write_if_changed() {
+  local dest=$1 content
+  content=$(cat)
+  if [[ ! -f $dest || $(<"$dest") != "$content" ]]; then
+    printf '%s\n' "$content" | omu_atomic_write "$dest" 644
+  fi
+}
+
+say "Configuring lock screen password authentication..."
+
+write_if_changed "$pam_dir/omarchy-lock-password" <<'PAM'
+#%PAM-1.0
+auth       required                    pam_faillock.so preauth silent deny=10 unlock_time=120
+-auth      [success=2 default=ignore]  pam_systemd_home.so
+auth       [success=1 default=bad]     pam_unix.so try_first_pass nullok
+auth       [default=die]               pam_faillock.so authfail deny=10 unlock_time=120
+auth       optional                    pam_permit.so
+auth       required                    pam_env.so
+auth       required                    pam_faillock.so authsucc
+account    include                     system-local-login
+PAM
+
+# Resume recovery goes with fingerprint PAM, as upstream does.
+resume_hook_src="$OMARCHY_PATH/default/systemd/system-sleep/fprintd-resume"
+resume_hook_dst=$OMU_ROOT/usr/lib/systemd/system-sleep/fprintd-resume
+stop_timeout_src="$OMARCHY_PATH/default/systemd/system/fprintd.service.d/10-stop-timeout.conf"
+stop_timeout_dst=$OMU_ROOT/etc/systemd/system/fprintd.service.d/10-stop-timeout.conf
+
+reload_systemd() {
+  [[ -n $OMU_ROOT ]] || systemctl daemon-reload
+}
+
+if any_user_has_prints; then
+  say "Configuring lock screen fingerprint authentication..."
+  if [[ -f $resume_hook_src ]] && ! cmp -s "$resume_hook_src" "$resume_hook_dst"; then
+    install -Dm755 "$resume_hook_src" "$resume_hook_dst"
+  fi
+  if [[ -f $stop_timeout_src ]] && ! cmp -s "$stop_timeout_src" "$stop_timeout_dst"; then
+    install -Dm644 "$stop_timeout_src" "$stop_timeout_dst"
+    reload_systemd
+  fi
+  write_if_changed "$pam_dir/omarchy-lock-fingerprint" <<'PAM'
+#%PAM-1.0
+auth       required                    pam_fprintd.so
+account    include                     system-local-login
+PAM
+else
+  say "No user has enrolled fingerprints; lock screen uses the password only."
+  rm -f "$pam_dir/omarchy-lock-fingerprint" "$resume_hook_dst"
+  if [[ -e $stop_timeout_dst ]]; then
+    rm -f "$stop_timeout_dst"
+    rmdir --ignore-fail-on-non-empty "$(dirname "$stop_timeout_dst")"
+    reload_systemd
+  fi
+fi
