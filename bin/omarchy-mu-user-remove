@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# omarchy:summary=Remove a user account from this Omarchy machine
+# omarchy:requires-sudo=true
+#
+# Also removes what the multi-user setup keeps for that user outside their
+# home: their FIDO2 line, fingerprints and LUKS keyslot. Refuses to remove
+# the account running it and the last administrator.
+#
+# Usage: omarchy-mu-user-remove [<user>] [--keep-home]
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+omu_is_admin || omu_die "Only an administrator can remove users."
+
+user="" keep_home=false
+for arg in "$@"; do
+  case $arg in
+    --keep-home) keep_home=true ;;
+    -*) omu_die "Unknown option: $arg" ;;
+    *) user=$arg ;;
+  esac
+done
+
+if [[ -z $user ]]; then
+  mapfile -t candidates < <(omu_human_users | grep -vx "$(id -un)")
+  (( ${#candidates[@]} )) || omu_die "There is no other user to remove."
+  user=$(gum choose --header "Remove which user?" "${candidates[@]}") || exit 1
+fi
+
+getent passwd "$user" >/dev/null || omu_die "No such user: $user"
+[[ $user != "$(id -un)" ]] || omu_die "You can't remove your own account."
+if omu_is_admin "$user"; then
+  admins=$(getent group "$OMU_ADMIN_GROUP" | cut -d: -f4 | tr ',' '\n' | grep -c . || true)
+  (( admins > 1 )) || omu_die "$user is the last administrator."
+fi
+loginctl show-user "$user" >/dev/null 2>&1 && omu_die "$user is logged in; log them out first."
+
+$keep_home && what="(keeping the home directory)" || what="and DELETE their home directory"
+gum confirm --default=false "Remove $user $what?" || exit 1
+
+sudo omarchy-mu-fido2-authfile remove --user "$user" >/dev/null 2>&1 || true
+sudo fprintd-delete "$user" >/dev/null 2>&1 || true
+sudo omarchy-mu-luks-enroll --remove "$user" || true
+
+if $keep_home; then
+  sudo userdel "$user"
+else
+  sudo userdel --remove "$user"
+fi
+sudo omarchy-mu-apply-lock --quiet || true
+omu_info "Removed $user."

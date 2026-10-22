@@ -1,0 +1,100 @@
+#!/bin/bash
+
+# omarchy:summary=Give a user their own password for unlocking the disk
+# omarchy:requires-sudo=true
+#
+# omarchy-provision-owner re-keys the encrypted root to the owner's password
+# and removes every other keyslot. This adds a keyslot for another user (any
+# existing disk password is needed to authorize it) and records which slot is
+# theirs in /etc/omarchy-multiuser/luks-slots, so --remove can drop exactly
+# that one. The boot prompt is the same for everyone; whichever password
+# matches a slot unlocks the disk.
+#
+# Usage: omarchy-mu-luks-enroll [<user>]          add a keyslot for <user>
+#        omarchy-mu-luks-enroll --remove <user>   remove the recorded keyslot
+#        omarchy-mu-luks-enroll --list
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+if (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+registry=$OMU_ROOT/etc/omarchy-multiuser/luks-slots
+
+# The LUKS device holding root: crypttab's "root" entry, else the kernel
+# command line (cryptdevice= or rd.luks.uuid=).
+luks_device() {
+  local spec="" arg
+  if [[ -f /etc/crypttab ]]; then
+    spec=$(awk '!/^#/ && $1 == "root" { print $2; exit }' /etc/crypttab)
+  fi
+  if [[ -z $spec ]]; then
+    for arg in $(</proc/cmdline); do
+      case $arg in
+        cryptdevice=*) spec=${arg#cryptdevice=}; spec=${spec%%:*} ;;
+        rd.luks.uuid=*) spec=${arg#rd.luks.uuid=}; spec="UUID=${spec#luks-}" ;;
+      esac
+    done
+  fi
+  [[ -n $spec ]] || return 1
+  case $spec in
+    UUID=*) echo "/dev/disk/by-uuid/${spec#UUID=}" ;;
+    PARTUUID=*) echo "/dev/disk/by-partuuid/${spec#PARTUUID=}" ;;
+    *) echo "$spec" ;;
+  esac
+}
+
+slots() {
+  cryptsetup luksDump --dump-json-metadata "$1" | jq -r '.keyslots | keys[]' | sort -n
+}
+
+device=$(luks_device) || omu_die "Couldn't find the encrypted root device."
+cryptsetup isLuks "$device" || omu_die "$device is not a LUKS device."
+
+case ${1:-} in
+  --list)
+    echo "Keyslots on $device: $(slots "$device" | paste -sd' ')"
+    [[ -f $registry ]] && cat "$registry"
+    exit 0
+    ;;
+  --remove)
+    user=${2:-}
+    [[ -n $user ]] || omu_die "Usage: omarchy-mu-luks-enroll --remove <user>"
+    slot=$(awk -v u="$user" '$1 == u { print $2 }' "$registry" 2>/dev/null | tail -1)
+    if [[ -z $slot ]]; then
+      echo "No disk keyslot recorded for $user."
+      exit 0
+    fi
+    (( $(slots "$device" | wc -l) > 1 )) || omu_die "Keyslot $slot is the last one; refusing to lock the disk for good."
+    echo "Removing $user's disk keyslot ($slot); authorize with any disk password."
+    cryptsetup luksKillSlot "$device" "$slot"
+    grep -v "^$user " "$registry" | omu_atomic_write "$registry" 600
+    omu_info "Removed $user's disk password."
+    exit 0
+    ;;
+esac
+
+user=${1:-}
+if [[ -z $user ]]; then
+  mapfile -t candidates < <(omu_human_users)
+  user=$(gum choose --header "Add a disk password for which user?" "${candidates[@]}") || exit 1
+fi
+getent passwd "$user" >/dev/null || omu_die "No such user: $user"
+
+echo "Adding a disk password for $user on $device."
+echo "First type an EXISTING disk password, then $user types their new one (twice)."
+echo "Tip: keep a header backup: cryptsetup luksHeaderBackup $device --header-backup-file <file>"
+
+before=$(slots "$device")
+cryptsetup luksAddKey "$device"
+after=$(slots "$device")
+slot=$(comm -13 <(echo "$before") <(echo "$after") | head -1)
+[[ -n $slot ]] || omu_die "Couldn't tell which keyslot was added."
+
+install -d -m 700 "$(dirname "$registry")"
+{ grep -v "^$user " "$registry" 2>/dev/null || true; echo "$user $slot"; } | omu_atomic_write "$registry" 600
+omu_info "$user can now unlock the disk with their own password (keyslot $slot)."
