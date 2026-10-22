@@ -1,7 +1,10 @@
 #!/bin/bash
+# shellcheck disable=SC2031  # $T is set by run_tests in the subshell each test runs in
+# shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
 valid_jsonc() {
+  # shellcheck disable=SC2016  # JavaScript, not shell
   node -e '
     const s = require("fs").readFileSync(process.argv[1], "utf8")
       .split("\n").filter(l => !/^\s*\/\//.test(l)).join("\n").replace(/,(\s*})/g, "$1")

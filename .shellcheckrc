@@ -1,0 +1,4 @@
+# The scripts source lib/ relative to their own directory
+# (`# shellcheck source=../lib/...` directives).
+source-path=SCRIPTDIR
+external-sources=true

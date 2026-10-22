@@ -1,5 +1,7 @@
 #!/bin/bash
+# shellcheck disable=SC2031  # $T is set by run_tests in the subshell each test runs in
 # omarchy-mu-sddm-sync and omarchy-mu-sddm-guard against a fake tree.
+# shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
 themes() { echo "$T/usr/share/sddm/themes"; }

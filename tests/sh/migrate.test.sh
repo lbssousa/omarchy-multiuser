@@ -1,6 +1,9 @@
 #!/bin/bash
+# shellcheck disable=SC2031  # $T is set by run_tests in the subshell each test runs in
+# shellcheck disable=SC2016  # migration bodies are literal shell code
 # omarchy-mu-migrate as a non-admin (OMU_FORCE_NON_ADMIN), with fake
 # migrations, a fake HOME and a fake machine registry.
+# shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
 setup() {

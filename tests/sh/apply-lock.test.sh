@@ -1,6 +1,8 @@
 #!/bin/bash
+# shellcheck disable=SC2031  # $T is set by run_tests in the subshell each test runs in
 # omarchy-mu-apply-lock against a fake tree ($OMU_ROOT), with a fake
 # OMARCHY_PATH providing the resume hook and stop-timeout sources.
+# shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
 setup_tree() {

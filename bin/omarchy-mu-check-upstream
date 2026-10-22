@@ -16,9 +16,9 @@ source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 sums=$OMU_SHARE/upstream.sha256
 [[ -f $sums ]] || exit 0
 
-changed=$(cd / && sha256sum --quiet --check "$sums" 2>/dev/null | sed -n 's/: FAILED.*$//p')
-if [[ -n $changed ]]; then
+mapfile -t changed < <(cd / && sha256sum --quiet --check "$sums" 2>/dev/null | sed -n 's/: FAILED.*$//p')
+if (( ${#changed[@]} )); then
   echo "omarchy-multiuser: Omarchy changed files its forks are based on; review them:"
-  printf '  %s\n' $changed
+  printf '  /%s\n' "${changed[@]}"
 fi
 exit 0

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Minimal test harness: each test_* function runs in a subshell with a fresh
 # $T (temp dir) and the repo's bin/ first on PATH. Assertion helpers fail the
 # test with a message.

@@ -1,7 +1,9 @@
 #!/bin/bash
+# shellcheck disable=SC2031  # $T is set by run_tests in the subshell each test runs in
 # omarchy-mu-fido2-authfile, under fakeroot (EUID 0, no SUDO_USER) with
 # --user, against a fake /etc/fido2. Uses two accounts that exist anywhere:
 # root and the user running the tests.
+# shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 me=$(id -un)
 

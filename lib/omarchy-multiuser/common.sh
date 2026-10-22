@@ -20,6 +20,7 @@ OMU_STATE_DIR=${OMU_STATE_DIR:-$OMU_ROOT/var/lib/omarchy-multiuser}
 OMU_LOCK_DIR=${OMU_LOCK_DIR:-$OMU_ROOT/run/lock}
 OMU_ADMIN_GROUP=${OMU_ADMIN_GROUP:-wheel}
 OMU_USERS_GROUP=${OMU_USERS_GROUP:-omarchy-users}
+# shellcheck disable=SC2034  # used by the scripts that source this
 OMU_THEME=omarchy-multiuser
 
 omu_die() {

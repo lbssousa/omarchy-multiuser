@@ -59,6 +59,7 @@ omu_migration_class() {
     done < <(grep -oE '\bomarchy-[a-z0-9-]+' <<<"$body" | sort -u)
   fi
 
+  # shellcheck disable=SC2016  # literal $HOME etc. in the migration's text
   if grep -qE '\$HOME|\$\{HOME|~/|XDG_(CONFIG|DATA|STATE|CACHE)_HOME|systemctl +--user|gsettings|hyprctl|omarchy-(state|toggle|theme|defaults|nvim|done|shell)' <<<"$body"; then
     personal=true
   fi
