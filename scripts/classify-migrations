@@ -1,0 +1,17 @@
+#!/bin/bash
+# Prints how omarchy-mu-migrate classifies each installed Omarchy migration
+# ("<name>\t<class>"), for review. Add corrections to
+# share/migrations-overrides.tsv.
+#
+# Usage: scripts/classify-migrations [migrations-dir]
+set -euo pipefail
+here=$(dirname "$(readlink -f "$0")")
+export OMU_SHARE=$here/../share
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$here/../lib/omarchy-multiuser/common.sh"
+OMU_MIGRATIONS_DIR=${1:-${OMARCHY_PATH:-/usr/share/omarchy}/migrations}
+# shellcheck source=../lib/omarchy-multiuser/migrations.sh
+source "$here/../lib/omarchy-multiuser/migrations.sh"
+for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
+  printf '%s\t%s\n' "$(basename "$file")" "$(omu_migration_class "$file")"
+done

@@ -1,0 +1,153 @@
+#!/bin/bash
+
+# omarchy:summary=Run Omarchy migrations for a user who isn't an administrator
+#
+# Omarchy's migrations (omarchy-migrate) run once per user, with their state
+# in ~/.local/state/omarchy/migrations, and many need sudo, which a user
+# outside wheel can't use: the first one that does stops every later
+# migration, and omarchy-migrate-notify asks again at every login.
+#
+# An administrator's own `omarchy-update` runs every migration, including the
+# privileged parts, and omarchy-mu-migrate-record@<admin>.path copies each of
+# their markers to /var/lib/omarchy-multiuser/migrations ("done on this
+# machine"). For everyone else, in order, each pending migration is:
+#
+#   user    run as usual, with sudo/pkexec/run0 replaced by stubs that fail,
+#           so a misclassified migration stops instead of prompting
+#   system  marked done once the machine registry has it (its work is
+#           machine-wide and the admin already did it), else left pending
+#   mixed   run once the registry has it, with sudo/pkexec/run0 stubbed to
+#           succeed (the privileged half already ran as the admin), so the
+#           part in $HOME still happens; else left pending
+#
+# Order matters as it does upstream: the first migration that can't run
+# (failed, or waiting for an admin) stops the run, and the next login retries.
+# Administrators get upstream's omarchy-migrate unchanged.
+#
+# Usage: omarchy-mu-migrate [--pending] [--quiet]
+# Exit:  0 nothing pending, 3 waiting for an admin, 1 a migration failed
+
+set -uo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+# shellcheck source=../lib/omarchy-multiuser/migrations.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/migrations.sh"
+
+mode=run
+quiet=false
+for arg in "$@"; do
+  case $arg in
+    --pending) mode=pending ;;
+    --quiet) quiet=true ;;
+    *) omu_die "Usage: omarchy-mu-migrate [--pending] [--quiet]" ;;
+  esac
+done
+
+if [[ -z ${OMU_FORCE_NON_ADMIN:-} ]] && omu_is_admin; then
+  if [[ $mode == pending ]]; then
+    exec omarchy-migrate --pending
+  fi
+  exec omarchy-migrate
+fi
+
+state_dir=${OMARCHY_MIGRATION_STATE:-$HOME/.local/state/omarchy/migrations}
+log_dir=${OMU_USER_LOG_DIR:-$HOME/.local/state/omarchy-multiuser}
+log=$log_dir/migrate.log
+
+say() {
+  $quiet || echo -e "$@"
+}
+
+log_line() {
+  mkdir -p "$log_dir"
+  printf '%s %s\n' "$(date -Is)" "$*" >>"$log"
+}
+
+[[ -d $OMU_MIGRATIONS_DIR ]] || exit 0
+
+if [[ $mode == pending ]]; then
+  for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
+    [[ -f $file ]] || continue
+    [[ -f $state_dir/$(basename "$file") ]] || basename "$file"
+  done
+  exit 0
+fi
+
+shims=$(mktemp -d)
+trap 'rm -rf "$shims"' EXIT
+mkdir -p "$shims/strict" "$shims/lenient"
+for cmd in sudo pkexec run0; do
+  cat >"$shims/strict/$cmd" <<SHIM
+#!/bin/bash
+echo "omarchy-multiuser: this migration needs root (\$(basename "\$0") \$*); ask an administrator." >&2
+exit 1
+SHIM
+  cat >"$shims/lenient/$cmd" <<SHIM
+#!/bin/bash
+printf '%s skipped (done by an admin): %s %s\n' "\$(date -Is)" "\$(basename "\$0")" "\$*" >>"$log"
+exit 0
+SHIM
+  chmod +x "$shims/strict/$cmd" "$shims/lenient/$cmd"
+done
+mkdir -p "$log_dir"
+
+run_migration() {
+  local file=$1 shim=$2
+  PATH="$shim:$PATH" OMARCHY_PATH="$OMARCHY_PATH" bash -euo pipefail "$file" </dev/null
+}
+
+mkdir -p "$state_dir"
+for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
+  [[ -f $file ]] || continue
+  name=$(basename "$file")
+  marker=$state_dir/$name
+  [[ -f $marker ]] && continue
+
+  class=$(omu_migration_class "$file")
+  registered=false
+  [[ -f $OMU_MIGRATION_REGISTRY/$name ]] && registered=true
+
+  case $class in
+    user)
+      say "\e[32mRunning migration (${name%.sh})\e[0m"
+      if run_migration "$file" "$shims/strict"; then
+        touch "$marker"
+        log_line "ran $name (user)"
+      else
+        log_line "FAILED $name (user)"
+        say "\e[31mMigration ${name%.sh} failed; see $log.\e[0m"
+        exit 1
+      fi
+      ;;
+    system)
+      if $registered; then
+        touch "$marker"
+        log_line "marked $name (system, done by an admin)"
+      else
+        log_line "waiting for an admin: $name (system)"
+        say "Migration ${name%.sh} needs an administrator to run omarchy-update first."
+        exit 3
+      fi
+      ;;
+    mixed|*)
+      if ! $registered; then
+        log_line "waiting for an admin: $name ($class)"
+        say "Migration ${name%.sh} needs an administrator to run omarchy-update first."
+        exit 3
+      fi
+      say "\e[32mRunning migration (${name%.sh}, your part)\e[0m"
+      if run_migration "$file" "$shims/lenient"; then
+        touch "$marker"
+        log_line "ran $name ($class, privileged part skipped)"
+      else
+        log_line "FAILED $name ($class)"
+        say "\e[31mMigration ${name%.sh} failed; see $log.\e[0m"
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+omarchy-notification-dismiss "Omarchy Migrations" >/dev/null 2>&1 || true
+exit 0

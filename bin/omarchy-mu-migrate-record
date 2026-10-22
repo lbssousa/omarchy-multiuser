@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# omarchy:summary=Record which migrations an administrator has run on this machine
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# Run as root by omarchy-mu-migrate-record@<admin>.path whenever that
+# administrator's ~/.local/state/omarchy/migrations changes (that is, after
+# their omarchy-migrate). Mirrors their markers into
+# /var/lib/omarchy-multiuser/migrations, which omarchy-mu-migrate reads to know
+# a privileged migration's machine-wide part is done.
+#
+# Usage: omarchy-mu-migrate-record <admin-user>
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+# shellcheck source=../lib/omarchy-multiuser/migrations.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/migrations.sh"
+
+user=${1:-}
+[[ -n $user ]] || omu_die "Usage: omarchy-mu-migrate-record <admin-user>"
+omu_is_admin "$user" || omu_die "$user is not an administrator; not recording their migrations."
+
+home=$(getent passwd "$user" | cut -d: -f6)
+[[ -n $home ]] || omu_die "Unknown user: $user"
+markers=$OMU_ROOT$home/.local/state/omarchy/migrations
+[[ -d $markers ]] || exit 0
+
+install -d -m 755 "$OMU_MIGRATION_REGISTRY"
+for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
+  [[ -f $file ]] || continue
+  name=$(basename "$file")
+  if [[ -f $markers/$name && ! -e $OMU_MIGRATION_REGISTRY/$name ]]; then
+    touch "$OMU_MIGRATION_REGISTRY/$name"
+    chmod 644 "$OMU_MIGRATION_REGISTRY/$name"
+  fi
+done

@@ -1,0 +1,10 @@
+# Enable once per administrator: omarchy-mu-migrate-record@<user>.path
+[Unit]
+Description=Watch %i's Omarchy migrations (omarchy-multiuser)
+
+[Path]
+PathChanged=/home/%i/.local/state/omarchy/migrations
+Unit=omarchy-mu-migrate-record@%i.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# omarchy:summary=Update Omarchy (administrators) or apply your pending migrations
+#
+# The menu's Update > Omarchy points here. omarchy-update upgrades the system
+# packages, which needs an administrator; for everyone else this applies the
+# migrations an administrator's update has made possible.
+
+set -uo pipefail
+
+if omarchy-mu-is-admin; then
+  exec omarchy-update "$@"
+fi
+
+echo "System updates are done by an administrator. Applying your pending migrations..."
+omarchy-mu-migrate
+case $? in
+  0) echo "Your account is up to date." ;;
+  3) echo "Some migrations are waiting for an administrator to run the update." ;;
+  *) echo "A migration failed; see ~/.local/state/omarchy-multiuser/migrate.log." ;;
+esac
+echo
+read -rsn1 -p "Press any key to close."

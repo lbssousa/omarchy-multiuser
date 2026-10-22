@@ -1,0 +1,6 @@
+[Unit]
+Description=Record the Omarchy migrations %i has run (omarchy-multiuser)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-mu-migrate-record %i

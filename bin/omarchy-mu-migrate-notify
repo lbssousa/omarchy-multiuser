@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# omarchy:summary=Run or announce pending Omarchy migrations at login (per user)
+# omarchy:hidden=true
+#
+# Replaces omarchy-migrate-notify's ExecStart through the package's drop-in
+# (systemd/user/omarchy-migrate-notify.service.d). Administrators get
+# upstream's notifier, which offers to run omarchy-migrate. Everyone else has
+# omarchy-mu-migrate apply what they can on their own, and is notified only
+# when a migration actually fails; one waiting for an administrator's
+# omarchy-update stays pending quietly and is retried at the next login.
+
+set -uo pipefail
+
+if omarchy-mu-is-admin; then
+  exec /usr/bin/omarchy-migrate-notify
+fi
+
+omarchy-mu-migrate --quiet
+status=$?
+
+if (( status == 1 )); then
+  omarchy-notification-wait || true
+  omarchy-notification-send -u critical -g  "Omarchy Migrations" \
+    "A migration failed for your account. Details are in ~/.local/state/omarchy-multiuser/migrate.log; an administrator may need to look at it." \
+    --exec omarchy-launch-floating-terminal-with-presentation omarchy-mu-migrate || true
+fi
+exit 0

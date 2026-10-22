@@ -1,0 +1,2 @@
+# Corrections to the automatic migration classes (lib/omarchy-multiuser/migrations.sh).
+# <migration file name><TAB><user|system|mixed>
