@@ -1,0 +1,92 @@
+#!/bin/bash
+
+# omarchy:summary=Register your FIDO2 key for sudo and polkit (per user)
+#
+# Fork of omarchy-setup-security-fido2 (upstream/bin) for machines with more
+# than one user. Upstream writes /etc/fido2/fido2 for whoever runs it and stops
+# when the file exists, so only the first user can ever register. Here:
+#
+#   - the PAM lines and packages are machine-wide and need an admin (wheel),
+#     who gets them set up exactly as upstream does;
+#   - every user, admin or not, then adds their own key to their own line of
+#     the shared authfile through omarchy-mu-fido2-authfile (sudo, own
+#     password), and can run this again to add a second key.
+
+set -e
+set -o pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+authline='pam_u2f.so cue authfile=/etc/fido2/fido2'
+
+check_fido2_hardware() {
+  tokens=$(fido2-token -L 2>/dev/null)
+  if [[ -z $tokens ]]; then
+    echo -e "\e[31m\nNo FIDO2 device detected. Please plug it in (you may need to unlock it as well).\e[0m"
+    return 1
+  fi
+  return 0
+}
+
+pam_configured() {
+  grep -q pam_u2f.so "$OMU_PAM_DIR/sudo" 2>/dev/null &&
+    grep -q pam_u2f.so "$OMU_PAM_DIR/polkit-1" 2>/dev/null
+}
+
+setup_pam_config() {
+  if ! grep -q pam_u2f.so /etc/pam.d/sudo; then
+    echo "Configuring sudo for FIDO2 authentication..."
+    sudo sed -i "1i auth    sufficient $authline" /etc/pam.d/sudo
+  fi
+
+  if [[ -f /etc/pam.d/polkit-1 ]] && ! grep -q 'pam_u2f.so' /etc/pam.d/polkit-1; then
+    echo "Configuring polkit for FIDO2 authentication..."
+    sudo sed -i "1i auth      sufficient $authline" /etc/pam.d/polkit-1
+  elif [[ ! -f /etc/pam.d/polkit-1 ]]; then
+    echo "Creating polkit configuration with FIDO2 authentication..."
+    sudo tee /etc/pam.d/polkit-1 >/dev/null <<PAM
+auth      sufficient $authline
+auth      include system-auth
+
+account   include system-auth
+password  include system-auth
+session   include system-auth
+PAM
+  fi
+}
+
+echo -e "\e[32mSetting up FIDO2 device for authentication.\n\e[0m"
+
+if omarchy-pkg-missing libfido2 pam-u2f >/dev/null 2>&1 || ! pam_configured; then
+  if ! omu_is_admin; then
+    omu_die "FIDO2 isn't set up on this machine yet. Ask an administrator to run omarchy-mu-setup-security-fido2 (or \`just system\`) first."
+  fi
+  echo "Installing required packages..."
+  omarchy-pkg-add libfido2 pam-u2f
+fi
+
+if ! check_fido2_hardware; then
+  exit 1
+fi
+
+if omu_is_admin; then
+  setup_pam_config
+fi
+
+if omarchy-mu-fido2-authfile has "$USER"; then
+  echo "You already have a FIDO2 key registered. Touch a key to add it as another one."
+fi
+
+echo -e "\e[32m\nLet's setup your device by confirming on the device now.\e[0m"
+echo -e "Touch your FIDO2 key when it lights up...\n"
+
+registration=$(pamu2fcfg -u "$USER") || omu_die "\nFIDO2 registration failed. Please try again."
+[[ -n $registration ]] || omu_die "\nFIDO2 registration failed. Please try again."
+
+echo "Saving the registration (sudo asks for your own password)..."
+if printf '%s\n' "$registration" | sudo omarchy-mu-fido2-authfile add; then
+  echo -e "\e[32mFIDO2 device registered successfully!\e[0m"
+else
+  omu_die "\nCould not save the FIDO2 registration."
+fi

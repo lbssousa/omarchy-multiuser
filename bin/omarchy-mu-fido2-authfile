@@ -1,0 +1,126 @@
+#!/bin/bash
+
+# omarchy:summary=Add or remove the calling user's FIDO2 keys in the shared pam_u2f authfile
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# Usage (through sudo, as the omarchy-users sudoers rule allows):
+#   pamu2fcfg -u "$USER" | sudo omarchy-mu-fido2-authfile add
+#   sudo omarchy-mu-fido2-authfile remove
+#   omarchy-mu-fido2-authfile has [user]        (no root needed)
+#
+# Omarchy keeps one authfile, /etc/fido2/fido2, with a line per user
+# ("user:credential[:credential...]"); upstream's setup writes the whole file
+# for whoever runs it. This helper only ever touches one line: the one of the
+# user sudo says called it (SUDO_USER), never a name from the arguments or
+# stdin. An administrator (sudo from a wheel member, or a root shell) may
+# pass --user to act on someone else's line, as omarchy-mu-user-remove does;
+# the omarchy-users sudoers rule only allows the bare `add` and `remove`.
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+action=${1:-}
+shift || true
+
+target=${SUDO_USER:-}
+if [[ ${1:-} == --user ]]; then
+  if [[ -n ${SUDO_USER:-} ]]; then
+    omu_is_admin "$SUDO_USER" || omu_die "--user is only for administrators."
+  else
+    (( EUID == 0 )) || omu_die "--user is only for administrators."
+  fi
+  target=${2:-}
+fi
+
+authfile=$OMU_FIDO2_AUTHFILE
+authdir=$(dirname "$authfile")
+
+valid_user() {
+  [[ $1 =~ ^[a-z_][a-z0-9_-]*[$]?$ ]] && getent passwd "$1" >/dev/null
+}
+
+# Lines of the authfile other than <user>'s.
+others() {
+  [[ -f $authfile ]] || return 0
+  awk -F: -v u="$1" '$1 != u && NF > 0' "$authfile"
+}
+
+current() {
+  [[ -f $authfile ]] || return 0
+  awk -F: -v u="$1" '$1 == u' "$authfile"
+}
+
+check_authdir() {
+  if [[ -L $authdir || ( -e $authdir && ! -d $authdir ) ]]; then
+    omu_die "$authdir is not a FIDO2 configuration directory."
+  fi
+  if [[ -L $authfile || ( -e $authfile && ! -f $authfile ) ]]; then
+    omu_die "$authfile is not a FIDO2 registration file."
+  fi
+}
+
+do_add() {
+  local user=$1 input creds line existing
+  # One line, as pamu2fcfg -u prints it: "<user>:<credential>[:<credential>]".
+  input=$(head -c 65536)
+  input=${input%$'\n'}
+  [[ $input != *$'\n'* ]] || omu_die "Expected a single pamu2fcfg line."
+  [[ ! $input =~ [[:cntrl:]] ]] || omu_die "The pamu2fcfg line has control characters."
+  [[ $input == "$user:"?* ]] || omu_die "The pamu2fcfg line is not for $user."
+  creds=${input#"$user:"}
+  [[ $creds =~ ^[A-Za-z0-9+/=,_.:-]+$ ]] || omu_die "The pamu2fcfg line is malformed."
+
+  existing=$(current "$user")
+  if [[ -n $existing ]]; then
+    line=$existing
+    local cred
+    IFS=':' read -r -a new_creds <<<"$creds"
+    for cred in "${new_creds[@]}"; do
+      [[ -n $cred ]] || continue
+      # Same key registered again: keep one copy.
+      if [[ ":${line#"$user:"}:" != *":$cred:"* ]]; then
+        line+=":$cred"
+      fi
+    done
+  else
+    line="$user:$creds"
+  fi
+
+  install -d -m 755 "$authdir"
+  { others "$user"; printf '%s\n' "$line"; } | omu_atomic_write "$authfile" 644
+  echo "FIDO2 key registered for $user."
+}
+
+do_remove() {
+  local user=$1 rest
+  [[ -f $authfile ]] || { echo "No FIDO2 keys registered."; return 0; }
+  rest=$(others "$user")
+  if [[ -n $rest ]]; then
+    printf '%s\n' "$rest" | omu_atomic_write "$authfile" 644
+  else
+    : | omu_atomic_write "$authfile" 644
+  fi
+  echo "FIDO2 keys removed for $user."
+  [[ -n $rest ]] || echo "empty"
+}
+
+case $action in
+  has)
+    user=${1:-$(id -un)}
+    [[ -n $(current "$user") ]]
+    ;;
+  add|remove)
+    (( EUID == 0 )) || omu_die "Run through sudo: sudo omarchy-mu-fido2-authfile $action"
+    [[ -n $target ]] || omu_die "Can't tell which user called (no SUDO_USER)."
+    valid_user "$target" || omu_die "Unknown user: $target"
+    check_authdir
+    omu_with_lock fido2 "do_$action" "$target"
+    ;;
+  *)
+    echo "Usage: omarchy-mu-fido2-authfile {add|remove|has [user]}" >&2
+    exit 2
+    ;;
+esac

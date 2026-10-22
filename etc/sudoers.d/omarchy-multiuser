@@ -1,0 +1,9 @@
+# omarchy-multiuser: what users outside wheel may do as root.
+#
+# Their own line in the shared FIDO2 authfile (the helper takes the user from
+# SUDO_USER and nothing else); asks for the user's own password. Only the
+# bare actions: --user is for administrators.
+%omarchy-users ALL=(root) /usr/bin/omarchy-mu-fido2-authfile add, /usr/bin/omarchy-mu-fido2-authfile remove
+# Recompute the lock screen's fingerprint PAM after enrolling or deleting
+# prints. Idempotent; its only options are --check and --quiet.
+%omarchy-users ALL=(root) NOPASSWD: /usr/bin/omarchy-mu-apply-lock "", /usr/bin/omarchy-mu-apply-lock --quiet, /usr/bin/omarchy-mu-apply-lock --check

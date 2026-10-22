@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# omarchy:summary=Remove your FIDO2 keys from sudo and polkit (per user)
+#
+# Fork of omarchy-remove-security-fido2 (upstream/bin). Upstream drops the PAM
+# lines, /etc/fido2 and the packages for everyone. Here a user removes only
+# their own line of the shared authfile; the machine-wide teardown happens
+# only for an admin, and only once no user has a key left (or with --all,
+# which also removes every other user's keys after asking).
+#
+# Usage: omarchy-mu-remove-security-fido2 [--all]
+
+set -e
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+all=false
+[[ ${1:-} == --all ]] && all=true
+
+remove_pam_config() {
+  if grep -q pam_u2f.so /etc/pam.d/sudo; then
+    echo "Removing FIDO2 authentication from sudo..."
+    sudo sed -i '/pam_u2f\.so/d' /etc/pam.d/sudo
+  fi
+
+  if [[ -f /etc/pam.d/polkit-1 ]] && grep -Fq 'pam_u2f.so' /etc/pam.d/polkit-1; then
+    echo "Removing FIDO2 authentication from polkit..."
+    sudo sed -i '/pam_u2f\.so/d' /etc/pam.d/polkit-1
+  fi
+}
+
+teardown() {
+  remove_pam_config
+
+  authdir=/etc/fido2
+  # rm -rf on a symlink removes the link itself, never what it points at.
+  if [[ -e $authdir || -L $authdir ]]; then
+    echo "Removing FIDO2 configuration..."
+    sudo rm -rf "$authdir"
+  fi
+
+  echo "Removing FIDO2 packages..."
+  omarchy-pkg-drop libfido2 pam-u2f
+
+  echo -e "\e[32mFIDO2 authentication has been completely removed.\e[0m"
+}
+
+echo -e "\e[32mRemoving your FIDO2 device from authentication.\n\e[0m"
+
+if $all; then
+  omu_is_admin || omu_die "Only an administrator can remove FIDO2 for every user."
+  users=$(cut -d: -f1 "$OMU_FIDO2_AUTHFILE" 2>/dev/null | paste -sd' ' || true)
+  if [[ -n $users ]]; then
+    echo "This removes the FIDO2 keys of: $users"
+    gum confirm "Remove FIDO2 for every user?" || exit 1
+  fi
+  teardown
+  exit 0
+fi
+
+result=$(sudo omarchy-mu-fido2-authfile remove)
+printf '%s\n' "$result" | grep -v '^empty$' || true
+
+if grep -qx empty <<<"$result"; then
+  if omu_is_admin; then
+    echo "No user has a FIDO2 key left; removing the machine-wide setup."
+    teardown
+  else
+    echo "No user has a FIDO2 key left. An administrator can remove the machine-wide setup with omarchy-mu-remove-security-fido2."
+  fi
+fi

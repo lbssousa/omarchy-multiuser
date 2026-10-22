@@ -1,0 +1,5 @@
+#!/bin/bash
+# omarchy:summary=Exit 0 when the current user is an administrator (wheel)
+# omarchy:hidden=true
+# Used by the multi-user menu block to show admin-only rows.
+id -nG "${1:-$(id -un)}" 2>/dev/null | tr ' ' '\n' | grep -qx wheel
