@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# omarchy:summary=Remove your fingerprints from sudo, polkit, and lock screen (per user)
+#
+# Fork of omarchy-remove-security-fingerprint (upstream/bin). Upstream strips
+# the PAM lines and drops fprintd for everyone. Here a user deletes only their
+# own prints (fprintd allows that without root) and omarchy-mu-apply-lock
+# keeps the lock screen's fingerprint PAM while anyone else still has prints.
+# The machine-wide teardown is `--all`, for an admin, once no user has prints.
+#
+# Usage: omarchy-mu-remove-security-fingerprint [--all]
+
+set -e
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+remove_pam_config() {
+  if grep -Eq 'pam_fprintd\.so|omarchy-hw-laptop-closed' /etc/pam.d/sudo; then
+    echo "Removing fingerprint authentication from sudo..."
+    sudo sed -i -e '/pam_fprintd\.so/d' -e '/omarchy-hw-laptop-closed/d' /etc/pam.d/sudo
+  fi
+  if [[ -f /etc/pam.d/polkit-1 ]] && grep -Eq 'pam_fprintd\.so|omarchy-hw-laptop-closed' /etc/pam.d/polkit-1; then
+    echo "Removing fingerprint authentication from polkit..."
+    sudo sed -i -e '/pam_fprintd\.so/d' -e '/omarchy-hw-laptop-closed/d' /etc/pam.d/polkit-1
+  fi
+}
+
+if [[ ${1:-} == --all ]]; then
+  omu_is_admin || omu_die "Only an administrator can remove fingerprint authentication for the machine."
+  if sudo omarchy-mu-apply-lock --check; then
+    omu_die "Some users still have enrolled fingerprints; each of them must run omarchy-mu-remove-security-fingerprint first."
+  fi
+  remove_pam_config
+  sudo omarchy-mu-apply-lock --quiet
+  echo "Removing fingerprint packages..."
+  omarchy-pkg-drop fprintd libfprint libfprint-git
+  echo -e "\e[32mFingerprint authentication has been removed from this machine.\e[0m"
+  exit 0
+fi
+
+echo -e "\e[32mRemoving your fingerprints.\n\e[0m"
+fprintd-delete "$USER"
+sudo -n omarchy-mu-apply-lock --quiet || true
+echo -e "\e[32mYour saved fingerprints have been removed.\e[0m"

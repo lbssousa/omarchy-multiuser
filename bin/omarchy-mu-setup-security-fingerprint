@@ -1,0 +1,96 @@
+#!/bin/bash
+
+# omarchy:summary=Enroll your fingerprint for sudo, polkit, and lock screen (per user)
+#
+# Fork of omarchy-setup-security-fingerprint (upstream/bin) for machines with
+# more than one user:
+#
+#   - enrolling needs no root: fprintd's polkit policy lets a user in an
+#     active session enroll their own fingers (upstream uses sudo);
+#   - packages and the sudo/polkit PAM lines are machine-wide and need an
+#     admin, who gets them set up as upstream does;
+#   - the lock screen's PAM is decided by omarchy-mu-apply-lock: on while any
+#     user has prints;
+#   - fprintd present means the reader's driver is already installed, so the
+#     libfprint-git install is skipped (it would replace a custom libfprint,
+#     such as omarchy-setup's goodix538d build).
+
+set -e
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+fprintd_gate="auth      [success=1 default=ignore] pam_exec.so quiet /usr/bin/omarchy-hw-laptop-closed"
+
+pam_configured() {
+  grep -q pam_fprintd.so "$OMU_PAM_DIR/sudo" 2>/dev/null &&
+    grep -q pam_fprintd.so "$OMU_PAM_DIR/polkit-1" 2>/dev/null
+}
+
+setup_pam_config() {
+  if ! grep -q pam_fprintd.so /etc/pam.d/sudo; then
+    echo "Configuring sudo for fingerprint authentication..."
+    sudo sed -i '1i auth      sufficient pam_fprintd.so' /etc/pam.d/sudo
+  fi
+  if ! grep -q 'omarchy-hw-laptop-closed' /etc/pam.d/sudo; then
+    sudo sed -i "/pam_fprintd\.so/i $fprintd_gate" /etc/pam.d/sudo
+  fi
+
+  if [[ -f /etc/pam.d/polkit-1 ]]; then
+    if ! grep -q 'pam_fprintd.so' /etc/pam.d/polkit-1; then
+      echo "Configuring polkit for fingerprint authentication..."
+      sudo sed -i '1i auth      sufficient pam_fprintd.so' /etc/pam.d/polkit-1
+    fi
+    if ! grep -q 'omarchy-hw-laptop-closed' /etc/pam.d/polkit-1; then
+      sudo sed -i "/pam_fprintd\.so/i $fprintd_gate" /etc/pam.d/polkit-1
+    fi
+  else
+    echo "Creating polkit configuration with fingerprint authentication..."
+    sudo tee /etc/pam.d/polkit-1 >/dev/null <<PAM
+$fprintd_gate
+auth      sufficient pam_fprintd.so
+auth      include system-auth
+
+account   include system-auth
+password  include system-auth
+session   include system-auth
+PAM
+  fi
+}
+
+echo -e "\e[32mSetting up fingerprint scanner for authentication.\n\e[0m"
+
+if ! omarchy-hw-fingerprint; then
+  omu_die "No fingerprint sensor detected."
+fi
+
+if omarchy-pkg-missing fprintd usbutils >/dev/null 2>&1; then
+  omu_is_admin || omu_die "The fingerprint service isn't installed. Ask an administrator to run omarchy-mu-setup-security-fingerprint first."
+  echo "Installing required packages..."
+  # Same transaction as upstream: --ask 4 accepts libfprint-git replacing
+  # libfprint in one go.
+  sudo pacman -S --needed --noconfirm --ask 4 -- libfprint-git fprintd usbutils
+fi
+
+echo -e "\e[32m\nLet's setup your right index finger as the first fingerprint.\e[0m"
+echo -e "Keep moving the finger around on sensor until the process completes.\n"
+
+fprintd-enroll "$USER" || omu_die "\nEnrollment failed. Please try again."
+echo -e "\e[32m\nFingerprint enrolled successfully!\e[0m"
+
+echo -e "\nNow let's verify that it's working correctly.\n"
+if ! fprintd-verify; then
+  echo -e "\e[31m\nVerification failed. You may want to try enrolling again.\e[0m"
+  exit 1
+fi
+
+if omu_is_admin; then
+  setup_pam_config
+elif ! pam_configured; then
+  echo "Your fingerprint is enrolled, but sudo and polkit don't ask for fingerprints on this machine yet. An administrator can enable that with omarchy-mu-setup-security-fingerprint."
+fi
+
+sudo -n omarchy-mu-apply-lock --quiet || echo "Couldn't update the lock screen now; it will pick your fingerprint up shortly." >&2
+
+echo -e "\e[32m\nPerfect! Fingerprint authentication is now configured.\e[0m"
+echo "You can use your fingerprint for sudo, polkit, and lock screen (Super + Ctrl + L)."
