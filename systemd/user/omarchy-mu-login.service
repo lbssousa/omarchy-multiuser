@@ -1,0 +1,10 @@
+[Unit]
+Description=Multi-user menu entries and fingerprint invitation (omarchy-multiuser)
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-mu-login
+
+[Install]
+WantedBy=graphical-session.target

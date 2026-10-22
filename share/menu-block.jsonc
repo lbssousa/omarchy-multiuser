@@ -1,0 +1,25 @@
+  // Per-user security setup (omarchy-multiuser): each user registers their own
+  // FIDO2 key and fingerprints; machine-wide parts stay with administrators.
+  "setup.security.fingerprint": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fingerprint"},
+  "setup.security.fido2": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fido2"},
+  "remove.security.fingerprint": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-remove-security-fingerprint"},
+  "remove.security.fido2": {"when":"omarchy-pkg-present pam-u2f && omarchy-mu-fido2-authfile has","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-remove-security-fido2"},
+  // System updates need an administrator; everyone else applies their migrations.
+  "update.omarchy": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-update"},
+  // Machine-wide: the greeter recolor, packages, services, sudo and the disk
+  // password are administrators' business.
+  "style.unlock": {"when":"omarchy-mu-is-admin"},
+  "install": {"when":"omarchy-mu-is-admin"},
+  "setup.security.sshd": {"when":"omarchy-mu-is-admin"},
+  "setup.security.sudoless-docker": {"when":"omarchy-mu-is-admin && omarchy-sudo-docker --configured"},
+  "setup.security.passwordless-sudo": {"when":"omarchy-mu-is-admin"},
+  "remove.security.sshd": {"when":"omarchy-mu-is-admin && systemctl is-enabled --quiet sshd"},
+  "remove.security.sudoless-docker": {"when":"omarchy-mu-is-admin && ! omarchy-sudo-docker --configured"},
+  "update.password.drive": {"when":"omarchy-mu-is-admin"},
+  // Accounts (administrators only).
+  "setup.users": {"icon":"","label":"Users","when":"omarchy-mu-is-admin"},
+  "setup.users.add": {"icon":"","label":"Add User","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-add"},
+  "setup.users.remove": {"icon":"","label":"Remove User","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-remove"},
+  "setup.users.luks": {"icon":"","label":"Disk Unlock Password","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-luks-enroll"},
+  // This machine's per-user setup (omarchy-setup), when it is installed.
+  "setup.omarchy-setup": {"icon":"","label":"Omarchy Setup","when":"command -v omarchy-setup-user","action":"omarchy-launch-floating-terminal-with-presentation omarchy-setup-user"},
