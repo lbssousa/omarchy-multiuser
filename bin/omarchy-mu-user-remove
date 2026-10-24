@@ -4,8 +4,11 @@
 # omarchy:requires-sudo=true
 #
 # Also removes what the multi-user setup keeps for that user outside their
-# home: their FIDO2 line, fingerprints and LUKS keyslot. Refuses to remove
-# the account running it and the last administrator.
+# home: their FIDO2 line, fingerprints and LUKS keyslot, and the sudo grants
+# that would outlive them (the installer's by name, omarchy-sudo-passwordless'
+# by UID, which a later account could be given). Refuses to remove the
+# account running it and the last administrator. When one account is left,
+# root gets its password back, as omarchy-provision-owner set it up.
 #
 # Usage: omarchy-mu-user-remove [<user>] [--keep-home]
 
@@ -15,6 +18,7 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 
 omu_is_admin || omu_die "Only an administrator can remove users."
+omu_hold_lock accounts || omu_die "Another account change is in progress."
 
 user="" keep_home=false
 for arg in "$@"; do
@@ -44,7 +48,9 @@ gum confirm --default=false "Remove $user $what?" || exit 1
 
 sudo omarchy-mu-fido2-authfile remove --user "$user" >/dev/null 2>&1 || true
 sudo fprintd-delete "$user" >/dev/null 2>&1 || true
-sudo omarchy-mu-luks-enroll --remove "$user" || true
+sudo omarchy-mu-luks-enroll --locked --remove "$user" || true
+# Before userdel: the grants must not outlive the account, even if this stops.
+sudo omarchy-mu-accounts drop-grants "$user"
 
 if $keep_home; then
   sudo userdel "$user"
@@ -52,4 +58,5 @@ else
   sudo userdel --remove "$user"
 fi
 sudo omarchy-mu-apply-lock --quiet || true
+sudo omarchy-mu-accounts root-sync
 omu_info "Removed $user."

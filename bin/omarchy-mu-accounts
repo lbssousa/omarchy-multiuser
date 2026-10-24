@@ -1,0 +1,136 @@
+#!/bin/bash
+
+# omarchy:summary=Root's side of adding and removing accounts: sudo grants and the root password
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# omarchy-provision-owner gives root the owner's password and, on an ISO
+# install, archinstall grants the owner sudo by name. Both assume one person.
+# omarchy-mu-user-add and -remove call this as root:
+#
+#   ensure-wheel-sudo  write %wheel ALL=(ALL:ALL) ALL (00-omarchy-wheel, what
+#                      omarchy-provision-owner writes) when it is missing, so
+#                      a second administrator gets sudo on an ISO install too
+#   drop-grants <user> delete what gives <user> sudo outside wheel: the
+#                      installer's NN_<user> grant and omarchy-sudo-passwordless'
+#                      99-omarchy-*nopasswd-<uid> rules, which name the UID and
+#                      would pass to the next account given it; then warn
+#                      about other sudoers rules naming <user> and the docker
+#                      group, which still lead to root
+#   lock-root          lock root's password: with several people, whoever
+#                      knew the owner's password would reach root without
+#                      being in wheel
+#   root-sync          lock-root with two or more accounts; with one, give
+#                      root that account's password hash back (the installer's
+#                      setup), but only when it is the caller's and an
+#                      administrator's
+#
+# Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|lock-root|root-sync
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+if (( EUID != 0 )) && [[ -z $OMU_ROOT ]]; then
+  exec sudo "$0" "$@"
+fi
+
+ensure_wheel_sudo() {
+  local file=$OMU_SUDOERS_DIR/00-omarchy-wheel
+  [[ -f $file ]] && return 0
+  echo "%$OMU_ADMIN_GROUP ALL=(ALL:ALL) ALL" | omu_atomic_write "$file" 440
+  if [[ -z $OMU_ROOT ]] && ! visudo -cqf "$file"; then
+    rm -f -- "$file"
+    omu_die "visudo rejected $file; not granting $OMU_ADMIN_GROUP sudo."
+  fi
+  echo "Administrators ($OMU_ADMIN_GROUP) can now use sudo."
+}
+
+# The rule archinstall writes for its users, alone in NN_<user>.
+installer_grant() {
+  local file=$1 user=$2 rules
+  rules=$(grep -vE '^[[:space:]]*(#|$)' "$file") || return 1
+  [[ $rules == "$user ALL=(ALL) ALL" || $rules == "$user ALL=(ALL:ALL) ALL" ]]
+}
+
+drop_grants() {
+  local user=$1 uid file
+  uid=$(getent passwd "$user" | cut -d: -f3)
+  [[ -n $uid ]] || omu_die "No such user: $user"
+
+  for file in "$OMU_SUDOERS_DIR"/[0-9][0-9]_"$user"; do
+    [[ -f $file ]] || continue
+    if installer_grant "$file" "$user"; then
+      rm -f -- "$file"
+      echo "Removed the installer's sudo grant for $user (${file##*/})."
+    fi
+  done
+  for file in "$OMU_SUDOERS_DIR/99-omarchy-nopasswd-$uid" "$OMU_SUDOERS_DIR/99-omarchy-permanent-nopasswd-$uid"; do
+    if [[ -e $file || -L $file ]]; then
+      rm -f -- "$file"
+      echo "Removed $user's passwordless sudo (${file##*/})."
+    fi
+  done
+
+  for file in "$OMU_SUDOERS_DIR"/* "$OMU_ROOT/etc/sudoers"; do
+    [[ -f $file ]] || continue
+    if grep -vE '^[[:space:]]*#' "$file" | grep -qwF -- "$user"; then
+      echo "Warning: ${file#"$OMU_ROOT"} still names $user; check it with visudo." >&2
+    fi
+  done
+  if omu_group_members docker | grep -qx "$user"; then
+    echo "Warning: $user is in the docker group, which is as good as root (gpasswd -d $user docker)." >&2
+  fi
+}
+
+root_hash() {
+  getent shadow root | cut -d: -f2
+}
+
+root_locked() {
+  local hash
+  hash=$(root_hash)
+  [[ -n $hash && ( $hash == '!'* || $hash == '*'* ) ]]
+}
+
+lock_root() {
+  root_locked && return 0
+  usermod -L root
+  root_locked || omu_die "Couldn't lock root's password."
+  echo "Locked root's password; administrators use sudo."
+}
+
+root_sync() {
+  local users hash
+  mapfile -t users < <(omu_human_users)
+  if (( ${#users[@]} != 1 )); then
+    lock_root
+    return 0
+  fi
+  root_locked || return 0
+  local user=${users[0]}
+  if [[ $user != "${SUDO_USER:-}" ]] || ! omu_group_members "$OMU_ADMIN_GROUP" | grep -qx "$user"; then
+    echo "Root stays locked: the one account left ($user) didn't ask for its password to be root's."
+    return 0
+  fi
+  hash=$(getent shadow "$user" | cut -d: -f2)
+  if [[ -z $hash || $hash == '!'* || $hash == '*'* ]]; then
+    echo "Root stays locked: $user has no usable password."
+    return 0
+  fi
+  # chpasswd -e reads the hash on stdin, so it never shows up in ps.
+  printf 'root:%s\n' "$hash" | chpasswd -e
+  echo "Root has $user's password again, as with a single owner."
+}
+
+case ${1:-} in
+  ensure-wheel-sudo) ensure_wheel_sudo ;;
+  drop-grants)
+    [[ -n ${2:-} ]] || omu_die "Usage: omarchy-mu-accounts drop-grants <user>"
+    drop_grants "$2"
+    ;;
+  lock-root) lock_root ;;
+  root-sync) root_sync ;;
+  *) omu_die "Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|lock-root|root-sync" ;;
+esac

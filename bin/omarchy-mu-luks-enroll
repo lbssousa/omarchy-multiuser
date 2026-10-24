@@ -13,6 +13,9 @@
 # Usage: omarchy-mu-luks-enroll [<user>]          add a keyslot for <user>
 #        omarchy-mu-luks-enroll --remove <user>   remove the recorded keyslot
 #        omarchy-mu-luks-enroll --list
+#
+# Takes the account-change lock, unless --locked says the caller
+# (omarchy-mu-user-add/-remove) already holds it.
 
 set -euo pipefail
 
@@ -24,6 +27,12 @@ if (( EUID != 0 )); then
 fi
 
 registry=$OMU_ROOT/etc/omarchy-multiuser/luks-slots
+
+if [[ ${1:-} == --locked ]]; then
+  shift
+elif [[ ${1:-} != --list ]]; then
+  omu_hold_lock accounts || omu_die "Another account change is in progress."
+fi
 
 # The LUKS device holding root: crypttab's "root" entry, else the kernel
 # command line (cryptdevice= or rd.luks.uuid=).

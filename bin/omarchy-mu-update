@@ -5,10 +5,27 @@
 # The menu's Update > Omarchy points here. omarchy-update upgrades the system
 # packages, which needs an administrator; for everyone else this applies the
 # migrations an administrator's update has made possible.
+#
+# Upstream's update lock lives in $XDG_RUNTIME_DIR, one per user, so two
+# administrators could update at once; this takes a machine-wide one first
+# (omarchy-mu-migrate's admin path takes the same). omarchy-update also logs
+# to a fixed /tmp/omarchy-update.log, which the first administrator to update
+# owns and nobody else can open (fs.protected_regular); it is moved aside to
+# /tmp/omarchy-update.log.<owner> for the next one.
 
 set -uo pipefail
 
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
 if omarchy-mu-is-admin; then
+  omu_hold_lock update || omu_die "An Omarchy update or migration is already running."
+  log=/tmp/omarchy-update.log
+  if [[ -e $log && ! -O $log ]]; then
+    owner=$(stat -c %U -- "$log")
+    echo "Moving $owner's last update log to $log.$owner."
+    sudo mv -f -- "$log" "$log.$owner"
+  fi
   exec omarchy-update "$@"
 fi
 

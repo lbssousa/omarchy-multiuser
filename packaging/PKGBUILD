@@ -43,6 +43,7 @@ package() {
   install -Dm644 -t "$pkgdir/etc/sddm.conf.d" etc/sddm.conf.d/zz-omarchy-multiuser.conf
   install -Dm440 -t "$pkgdir/etc/sudoers.d" etc/sudoers.d/omarchy-multiuser
   install -Dm644 -t "$pkgdir/usr/lib/sysusers.d" sysusers.d/omarchy-multiuser.conf
+  install -Dm644 -t "$pkgdir/usr/lib/tmpfiles.d" tmpfiles.d/omarchy-multiuser.conf
   install -Dm644 -t "$pkgdir/usr/lib/systemd/system" systemd/system/*
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" systemd/user/*.service
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user/omarchy-migrate-notify.service.d" \

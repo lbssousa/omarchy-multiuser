@@ -10,6 +10,12 @@
 # provisioning (omarchy-provision-user, as provision-owner's finalize_user
 # runs it) sets the theme, git identity and keyring up before the first login.
 #
+# With a second person on the machine, root's password (the owner's, from
+# omarchy-provision-owner) is locked before the account exists, so a stop
+# part way leaves more protection, not less. The new account gets the lowest
+# UID that owns nothing in /home, and an administrator gets the %wheel sudo
+# rule when an ISO install granted the owner sudo by name only.
+#
 # Usage: omarchy-mu-user-add [<user> --full-name <name>] [--email <address>]
 #                            [--admin] [--shell <path>] [--groups g1,g2] [--luks]
 # Without a user name it asks for everything.
@@ -20,6 +26,7 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 
 omu_is_admin || omu_die "Only an administrator can add users."
+omu_hold_lock accounts || omu_die "Another account change is in progress."
 
 user="" full_name="" email="" admin=false shell=/bin/bash groups="" luks=false
 while (($#)); do
@@ -55,8 +62,12 @@ group_list=$OMU_USERS_GROUP
 $admin && group_list+=",$OMU_ADMIN_GROUP"
 [[ -n $groups ]] && group_list+=",$groups"
 
+uid=$(omu_free_uid) || omu_die "No free UID left."
+
 sudo groupadd -f "$OMU_USERS_GROUP"
-sudo useradd --create-home --comment "$full_name" --shell "$shell" --groups "$group_list" "$user"
+$admin && sudo omarchy-mu-accounts ensure-wheel-sudo
+sudo omarchy-mu-accounts lock-root
+sudo useradd --create-home --uid "$uid" --comment "$full_name" --shell "$shell" --groups "$group_list" "$user"
 omu_info "Created $user ($full_name)."
 
 echo "Set $user's password:"
@@ -78,7 +89,7 @@ sudo runuser -u "$user" -- env \
   echo "Omarchy's per-user setup didn't finish; it runs again at $user's first login." >&2
 
 if $luks; then
-  sudo omarchy-mu-luks-enroll "$user"
+  sudo omarchy-mu-luks-enroll --locked "$user"
 fi
 
 omu_info "\n$user can now log in from the login screen."

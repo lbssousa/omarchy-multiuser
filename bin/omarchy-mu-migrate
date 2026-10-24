@@ -18,11 +18,14 @@
 #           machine-wide and the admin already did it), else left pending
 #   mixed   run once the registry has it, with sudo/pkexec/run0 stubbed to
 #           succeed (the privileged half already ran as the admin), so the
-#           part in $HOME still happens; else left pending
+#           part in $HOME still happens; else left pending. The stub drains
+#           its stdin, so `... | sudo tee` doesn't break the writer's pipe
 #
 # Order matters as it does upstream: the first migration that can't run
 # (failed, or waiting for an admin) stops the run, and the next login retries.
-# Administrators get upstream's omarchy-migrate unchanged.
+# Administrators get upstream's omarchy-migrate unchanged, under the same
+# machine-wide lock as omarchy-mu-update, so two administrators never run one
+# migration at once.
 #
 # Usage: omarchy-mu-migrate [--pending] [--quiet]
 # Exit:  0 nothing pending, 3 waiting for an admin, 1 a migration failed
@@ -47,6 +50,10 @@ done
 if [[ -z ${OMU_FORCE_NON_ADMIN:-} ]] && omu_is_admin; then
   if [[ $mode == pending ]]; then
     exec omarchy-migrate --pending
+  fi
+  if ! omu_hold_lock update; then
+    $quiet || echo "An Omarchy update or migration is already running."
+    exit 3
   fi
   exec omarchy-migrate
 fi
@@ -85,6 +92,7 @@ exit 1
 SHIM
   cat >"$shims/lenient/$cmd" <<SHIM
 #!/bin/bash
+cat >/dev/null 2>&1 || true
 printf '%s skipped (done by an admin): %s %s\n' "\$(date -Is)" "\$(basename "\$0")" "\$*" >>"$log"
 exit 0
 SHIM

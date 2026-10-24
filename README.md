@@ -15,6 +15,8 @@ points the Omarchy menu at them.
 | `omarchy-remove-security-{fido2,fingerprint}` tear PAM and packages down for everyone | Each user removes their own keys/prints; machine-wide teardown only when nobody has any left |
 | `omarchy-apply-lock` drops fingerprint unlock if *the caller* has no prints | Kept while *any* user has prints (`omarchy-mu-apply-lock`, re-run by a path unit) |
 | Migrations stall for users outside `wheel` | Run what they can, privileged parts gated on an admin's run (`omarchy-mu-migrate`) |
+| Root has the owner's password; ISO installs grant the owner sudo by name | Root locked while there are several accounts; sudo grants by name or UID removed with the account (`omarchy-mu-accounts`) |
+| Update lock per user, update log at a fixed `/tmp` path | One machine-wide lock for administrators' updates and migrations; another admin's log moved aside |
 | — | `omarchy-mu-user-add`, `omarchy-mu-user-remove`, `omarchy-mu-luks-enroll` |
 
 ## The greeter
@@ -53,6 +55,34 @@ Administrators are the members of `wheel`; everyone else is in
 Fingerprints need no root at all: fprintd lets a user in an active session
 enroll and delete their own.
 
+## Accounts and root
+
+`omarchy-mu-user-add` and `-remove` hold `/run/lock/omarchy-mu-accounts.lock`
+(as does `omarchy-mu-luks-enroll`), so two account changes never interleave.
+The lock files come from `tmpfiles.d`, `root:wheel 0640`: only
+administrators can open them.
+
+- **Root.** `omarchy-provision-owner` gives root the owner's password, so with
+  more people anyone who learns it reaches root outside `wheel`. Adding the
+  second account locks root first; removing down to one account gives root
+  that account's password hash back, when it's the caller and an
+  administrator. On machines that already have several accounts, run
+  `omarchy-mu-accounts root-sync` once. A locked root also means no password
+  for systemd's emergency shell.
+- **Sudo grants.** Removal deletes the installer's `NN_<user>` grant and
+  `omarchy-sudo-passwordless`' `99-omarchy-*nopasswd-<uid>` rules before
+  `userdel`, and warns about other sudoers rules naming the account or its
+  `docker` membership. New accounts get the lowest UID that owns nothing in
+  `/home`, so a kept home never passes to someone else. Adding an
+  administrator writes `%wheel ALL=(ALL:ALL) ALL` when an ISO install only
+  granted the owner by name.
+- **Updates.** `omarchy-mu-update` (Update › Omarchy) and the administrators'
+  `omarchy-mu-migrate` hold `/run/lock/omarchy-mu-update.lock`. Upstream's
+  own lock is per user. `/tmp/omarchy-update.log` belongs to whoever updated
+  first and nobody else can open it, so it is moved to
+  `/tmp/omarchy-update.log.<owner>` for the next administrator. Running
+  `omarchy-update` directly bypasses both.
+
 ## Migrations
 
 `omarchy-update` (system packages, then migrations) is for administrators.
@@ -66,7 +96,7 @@ notifier (a drop-in on `omarchy-migrate-notify.service`) runs
 - **user**: runs, with `sudo`/`pkexec`/`run0` stubbed to fail;
 - **system**: marked done once an admin has run it;
 - **mixed**: runs once an admin has, with the privileged commands stubbed to
-  succeed and logged.
+  succeed and logged (the stubs drain stdin, so `… | sudo tee` works).
 
 The first migration that can't run stops the run, as upstream does; the next
 login retries. `just classify-migrations` prints the classes for review.

@@ -18,6 +18,9 @@ OMU_SDDM_CONF_DIR=${OMU_SDDM_CONF_DIR:-$OMU_ROOT/etc/sddm.conf.d}
 OMU_SDDM_THEMES=${OMU_SDDM_THEMES:-$OMU_ROOT/usr/share/sddm/themes}
 OMU_STATE_DIR=${OMU_STATE_DIR:-$OMU_ROOT/var/lib/omarchy-multiuser}
 OMU_LOCK_DIR=${OMU_LOCK_DIR:-$OMU_ROOT/run/lock}
+OMU_SUDOERS_DIR=${OMU_SUDOERS_DIR:-$OMU_ROOT/etc/sudoers.d}
+OMU_HOME_DIR=${OMU_HOME_DIR:-$OMU_ROOT/home}
+OMU_LOGIN_DEFS=${OMU_LOGIN_DEFS:-$OMU_ROOT/etc/login.defs}
 OMU_ADMIN_GROUP=${OMU_ADMIN_GROUP:-wheel}
 OMU_USERS_GROUP=${OMU_USERS_GROUP:-omarchy-users}
 # shellcheck disable=SC2034  # used by the scripts that source this
@@ -66,4 +69,46 @@ omu_with_lock() {
     flock -w 30 9 || omu_die "Timed out waiting for the $name lock."
     "$@"
   ) 9>"$OMU_LOCK_DIR/omarchy-mu-$name.lock"
+}
+
+# omu_hold_lock <name> — hold a machine-wide lock until this process ends,
+# or fail at once when someone else holds it. The files come from tmpfiles.d
+# (root:wheel 0640), so only administrators can open them, and opening them
+# read-only means one administrator can't create them under their own name
+# and keep the others out. Children inherit the descriptor (sudo closes it);
+# close it ({OMU_LOCK_FD}<&-) for anything that may outlive the command.
+omu_hold_lock() {
+  local file=$OMU_LOCK_DIR/omarchy-mu-$1.lock
+  [[ -f $file ]] || omu_die "Missing $file; run: sudo systemd-tmpfiles --create omarchy-multiuser.conf"
+  exec {OMU_LOCK_FD}<"$file" || omu_die "Can't open $file (administrators only)."
+  flock -n "$OMU_LOCK_FD"
+}
+
+_omu_login_def() {
+  local value
+  value=$(awk -v k="$1" '$1 == k { print $2 }' "$OMU_LOGIN_DEFS" 2>/dev/null | tail -1)
+  echo "${value:-$2}"
+}
+
+# The lowest UID in UID_MIN..UID_MAX that no account has and that owns
+# nothing directly under /home, so a home kept by `userdel` (--keep-home)
+# never passes to the next account created.
+omu_free_uid() {
+  local min max uid
+  min=$(_omu_login_def UID_MIN 1000)
+  max=$(_omu_login_def UID_MAX 60000)
+  declare -A taken=()
+  while read -r uid; do taken[$uid]=1; done < <(
+    getent passwd | cut -d: -f3
+    find "$OMU_HOME_DIR" -mindepth 1 -maxdepth 1 -printf '%U\n' 2>/dev/null
+  )
+  for ((uid = min; uid <= max; uid++)); do
+    [[ -n ${taken[$uid]:-} ]] || { echo "$uid"; return 0; }
+  done
+  return 1
+}
+
+# omu_group_members <group> — its listed members, one per line.
+omu_group_members() {
+  getent group "$1" | cut -d: -f4 | tr ',' '\n' | grep . || true
 }

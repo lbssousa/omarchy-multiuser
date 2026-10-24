@@ -79,6 +79,16 @@ touch "$HOME/ran-100"'
   assert_contains "$HOME/.local/state/omarchy-multiuser/migrate.log" "skipped (done by an admin): sudo pacman -S foo"
 }
 
+test_mixed_sudo_tee_keeps_the_pipe_open() {
+  setup
+  # More than a pipe buffer: a stub that doesn't read would break the writer.
+  migration 100 'head -c 300000 /dev/zero | sudo tee /etc/x >/dev/null
+touch "$HOME/ran-100"'
+  register 100
+  omarchy-mu-migrate --quiet || fail "exit $?"
+  assert_file "$HOME/ran-100"
+}
+
 test_misclassified_user_migration_fails_loudly() {
   setup
   printf '100.sh\tuser\n' >"$OMU_MIGRATION_OVERRIDES"
