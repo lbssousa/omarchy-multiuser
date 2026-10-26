@@ -37,4 +37,29 @@ test_creates_missing_file() {
   valid_jsonc "$T/new/menu.jsonc"
 }
 
+# An admin gate replaces the entry's own `when`, so it must carry Omarchy's
+# condition along, and the entry must still exist upstream.
+test_admin_gates_keep_upstream_conditions() {
+  local menu=${OMU_UPSTREAM_MENU:-/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc}
+  [[ -f $menu ]] || { echo "    (no installed Omarchy menu; skipped)"; return 0; }
+  # shellcheck disable=SC2016  # JavaScript, not shell
+  node -e '
+    const fs = require("fs")
+    const parse = f => JSON.parse(fs.readFileSync(f, "utf8").split("\n")
+      .filter(l => !/^\s*\/\//.test(l)).join("\n").replace(/,(\s*})/g, "$1"))
+    const upstream = parse(process.argv[1])
+    const block = parse(process.argv[2])
+    let bad = []
+    for (const [id, entry] of Object.entries(block)) {
+      const m = /^omarchy-mu-is-admin(?: && (.*))?$/.exec(entry.when || "")
+      if (!m || entry.label) continue
+      if (!upstream[id]) { bad.push(id + ": gone upstream"); continue }
+      let want = upstream[id].when, got = m[1]
+      if (got && /\|\|/.test(want || "")) got = got.replace(/^\((.*)\)$/, "$1")
+      if ((want || undefined) !== got) bad.push(id + ": upstream when is " + JSON.stringify(want))
+    }
+    if (bad.length) { console.error(bad.join("\n")); process.exit(1) }
+  ' "$menu" <(printf '{\n%s\n}\n' "$(cat "$REPO/share/menu-block.jsonc")") || fail "admin gates out of date"
+}
+
 run_tests

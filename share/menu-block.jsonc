@@ -16,6 +16,34 @@
   "remove.security.sshd": {"when":"omarchy-mu-is-admin && systemctl is-enabled --quiet sshd"},
   "remove.security.sudoless-docker": {"when":"omarchy-mu-is-admin && ! omarchy-sudo-docker --configured"},
   "update.password.drive": {"when":"omarchy-mu-is-admin"},
+  // Removing software drops packages for everyone. What lives in the user's
+  // own home (themes, web apps, TUIs, the Windows VM, mise dev envs, Microsoft
+  // and Xbox Cloud web apps, the SSH agent) stays theirs.
+  "remove.package": {"when":"omarchy-mu-is-admin"},
+  "remove.ai": {"when":"omarchy-mu-is-admin"},
+  "remove.dictation": {"when":"omarchy-mu-is-admin && (omarchy-pkg-present voxtype-bin || omarchy-pkg-present superwhisper-bin)"},
+  "remove.browser": {"when":"omarchy-mu-is-admin"},
+  "remove.preinstalls": {"when":"omarchy-mu-is-admin && [[ ! -f $HOME/.local/state/omarchy/preinstalls-removed ]]"},
+  "remove.service.dropbox": {"when":"omarchy-mu-is-admin && omarchy-pkg-present dropbox"},
+  "remove.service.tailscale": {"when":"omarchy-mu-is-admin && omarchy-pkg-present tailscale"},
+  "remove.gaming.steam": {"when":"omarchy-mu-is-admin && omarchy-pkg-present steam"},
+  "remove.gaming.retroarch": {"when":"omarchy-mu-is-admin && omarchy-pkg-present retroarch"},
+  "remove.gaming.minecraft": {"when":"omarchy-mu-is-admin && omarchy-pkg-present minecraft-launcher"},
+  "remove.gaming.geforce-now": {"when":"omarchy-mu-is-admin && flatpak info com.nvidia.geforcenow"},
+  "remove.gaming.xbox-controllers": {"when":"omarchy-mu-is-admin && omarchy-pkg-present xpadneo-dkms"},
+  "remove.gaming.lutris": {"when":"omarchy-mu-is-admin && omarchy-pkg-present lutris"},
+  "remove.gaming.heroic": {"when":"omarchy-mu-is-admin && omarchy-pkg-present heroic-games-launcher-bin"},
+  "remove.development.php.php": {"when":"omarchy-mu-is-admin && ([[ -d $HOME/.local/share/mise/installs/php ]] || omarchy-pkg-present php)"},
+  "remove.development.php.symfony": {"when":"omarchy-mu-is-admin && omarchy-pkg-present symfony-cli"},
+  "remove.development.ocaml": {"when":"omarchy-mu-is-admin && [[ -d $HOME/.opam ]]"},
+  // The machine's clock, time zone, release channel, firmware, boot splash
+  // and trackpad driver.
+  "update.channel": {"when":"omarchy-mu-is-admin"},
+  "update.firmware": {"when":"omarchy-mu-is-admin"},
+  "update.timezone": {"when":"omarchy-mu-is-admin"},
+  "update.time": {"when":"omarchy-mu-is-admin"},
+  "update.config.plymouth": {"when":"omarchy-mu-is-admin"},
+  "update.hardware.trackpad": {"when":"omarchy-mu-is-admin"},
   // Accounts (administrators only).
   "setup.users": {"icon":"","label":"Users","when":"omarchy-mu-is-admin"},
   "setup.users.add": {"icon":"","label":"Add User","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-add"},

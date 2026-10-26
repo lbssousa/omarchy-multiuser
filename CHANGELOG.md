@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+More from Omarchy PR #16100.
+
+- Mixed migrations: a privileged step about the user's own account (their
+  name, `user:group` or a path in their home) fails instead of being
+  skipped, and the migration waits for an administrator.
+- Menu: for users outside wheel, the Remove entries that drop packages and
+  the machine-wide Update entries (channel, firmware, time zone, time,
+  Plymouth, trackpad) are hidden.
+
 ## 0.2.0 (2026-10-24)
 
 Ideas taken from Omarchy PR #16100 (administrator and limited accounts).

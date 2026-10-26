@@ -55,6 +55,12 @@ Administrators are the members of `wheel`; everyone else is in
 Fingerprints need no root at all: fprintd lets a user in an active session
 enroll and delete their own.
 
+The menu hides from everyone else what would only end in sudo's refusal:
+**Install**, the **Remove** entries that drop packages (what lives in their
+own home, such as web apps, TUIs and mise dev envs, stays), and
+**Update › Channel, Firmware, Timezone, Time**, *Config › Plymouth* and
+*Hardware › Trackpad*.
+
 ## Accounts and root
 
 `omarchy-mu-user-add` and `-remove` hold `/run/lock/omarchy-mu-accounts.lock`
@@ -96,7 +102,11 @@ notifier (a drop-in on `omarchy-migrate-notify.service`) runs
 - **user**: runs, with `sudo`/`pkexec`/`run0` stubbed to fail;
 - **system**: marked done once an admin has run it;
 - **mixed**: runs once an admin has, with the privileged commands stubbed to
-  succeed and logged (the stubs drain stdin, so `… | sudo tee` works).
+  succeed and logged (the stubs drain stdin, so `… | sudo tee` works). A
+  step about the user's own account, naming them (alone or as `user:group`)
+  or a path in their home, as in `sudo gpasswd -d "$USER" input`, is not one
+  the admin's run did for them: that stub fails, and the migration waits for
+  an administrator to do it.
 
 The first migration that can't run stops the run, as upstream does; the next
 login retries. `just classify-migrations` prints the classes for review.

@@ -89,6 +89,59 @@ touch "$HOME/ran-100"'
   assert_file "$HOME/ran-100"
 }
 
+test_mixed_step_about_this_account_waits_for_admin() {
+  setup
+  migration 100 'sudo gpasswd -d "$USER" input
+touch "$HOME/ran-100"'
+  register 100
+  omarchy-mu-migrate --quiet 2>/dev/null
+  assert_eq $? 3
+  assert_no_file "$(marker 100)"
+  assert_no_file "$HOME/ran-100"
+  assert_contains "$HOME/.local/state/omarchy-multiuser/migrate.log" "waiting for an admin: 100.sh (mixed, for this account: sudo gpasswd -d $(id -un) input)"
+}
+
+test_mixed_step_naming_this_account_in_other_forms() {
+  setup
+  local me; me=$(id -un)
+  migration 100 "sudo chown $me:$me /x"
+  migration 101 "sudo chown root:$me /x"
+  migration 102 'sudo rm -f "$HOME/.config/x"'
+  migration 103 "sudo cat /etc/usbguard/IPCAccessControl.d/$me"
+  local n
+  for n in 100 101 102 103; do
+    printf '%s.sh\tmixed\n' "$n" >"$OMU_MIGRATION_OVERRIDES"
+    register "$n"
+    omarchy-mu-migrate --quiet 2>/dev/null
+    assert_eq $? 3 "migration $n"
+    rm -f "$OMU_MIGRATIONS_DIR/$n.sh"
+  done
+}
+
+test_mixed_step_only_sharing_a_name_is_skipped() {
+  setup
+  local me; me=$(id -un)
+  # The program (and sudo's own -u value) aren't the account's arguments.
+  migration 100 "sudo -u root /usr/bin/$me --flag
+sudo -- $me
+touch \"\$HOME/ran-100\""
+  register 100
+  omarchy-mu-migrate --quiet || fail "exit $?"
+  assert_file "$HOME/ran-100"
+}
+
+test_mixed_failing_check_about_this_account_still_completes() {
+  setup
+  # A sudo check whose failure the migration handles itself.
+  migration 100 '[[ $(sudo cat "/etc/usbguard/IPCAccessControl.d/$USER" 2>/dev/null) == x ]] || true
+sudo systemctl disable --now foo
+touch "$HOME/ran-100"'
+  register 100
+  omarchy-mu-migrate --quiet || fail "exit $?"
+  assert_file "$HOME/ran-100"
+  assert_file "$(marker 100)"
+}
+
 test_misclassified_user_migration_fails_loudly() {
   setup
   printf '100.sh\tuser\n' >"$OMU_MIGRATION_OVERRIDES"

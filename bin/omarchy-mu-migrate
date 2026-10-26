@@ -19,7 +19,12 @@
 #   mixed   run once the registry has it, with sudo/pkexec/run0 stubbed to
 #           succeed (the privileged half already ran as the admin), so the
 #           part in $HOME still happens; else left pending. The stub drains
-#           its stdin, so `... | sudo tee` doesn't break the writer's pipe
+#           its stdin, so `... | sudo tee` doesn't break the writer's pipe.
+#           A step about the user's own account (their name, alone or as
+#           user:group, or a path in their home, among the command's
+#           arguments, as in `sudo gpasswd -d "$USER" input`) is not one the
+#           admin's run did for them: there the stub fails, and the migration
+#           waits until an administrator has done it
 #
 # Order matters as it does upstream: the first migration that can't run
 # (failed, or waiting for an admin) stops the run, and the next login retries.
@@ -90,19 +95,45 @@ for cmd in sudo pkexec run0; do
 echo "omarchy-multiuser: this migration needs root (\$(basename "\$0") \$*); ask an administrator." >&2
 exit 1
 SHIM
-  cat >"$shims/lenient/$cmd" <<SHIM
+  cat >"$shims/lenient/$cmd" <<'SHIM'
 #!/bin/bash
+# The command's own options come first, then the program, which is not the
+# account even when it shares its name: only the program's arguments count.
+args=("$@")
+i=0
+while (( i < ${#args[@]} )); do
+  case ${args[i]} in
+    --) i=$((i + 1)); break ;;
+    -u | -g | -p | -C | -D | -h | -r | -t | -T | -U | --user | --group | --chdir | --setenv | \
+      --unit | --property | --description | --slice | --nice | --background) i=$((i + 2)) ;;
+    -*) i=$((i + 1)) ;;
+    *) break ;;
+  esac
+done
+account=$(id -un)
+for arg in "${args[@]:i+1}"; do
+  if [[ $arg == "$account" || $arg == "$account":* || $arg == *:"$account" || $arg == */"$account" ||
+    $arg == "$HOME" || $arg == "$HOME"/* ]]; then
+    printf '%s needs an administrator, for this account: %s %s\n' "$(date -Is)" "$(basename "$0")" "$*" >>"$OMU_SHIM_LOG"
+    printf '%s %s\n' "$(basename "$0")" "$*" >>"$OMU_SHIM_NEEDS_ADMIN"
+    echo "Needs an administrator, for this account: $(basename "$0") $*" >&2
+    exit 1
+  fi
+done
 cat >/dev/null 2>&1 || true
-printf '%s skipped (done by an admin): %s %s\n' "\$(date -Is)" "\$(basename "\$0")" "\$*" >>"$log"
+printf '%s skipped (done by an admin): %s %s\n' "$(date -Is)" "$(basename "$0")" "$*" >>"$OMU_SHIM_LOG"
 exit 0
 SHIM
   chmod +x "$shims/strict/$cmd" "$shims/lenient/$cmd"
 done
 mkdir -p "$log_dir"
+# What the lenient stub refused because it was about this account.
+needs_admin=$shims/needs-admin
 
 run_migration() {
   local file=$1 shim=$2
-  PATH="$shim:$PATH" OMARCHY_PATH="$OMARCHY_PATH" bash -euo pipefail "$file" </dev/null
+  PATH="$shim:$PATH" OMARCHY_PATH="$OMARCHY_PATH" OMU_SHIM_LOG="$log" OMU_SHIM_NEEDS_ADMIN="$needs_admin" \
+    bash -euo pipefail "$file" </dev/null
 }
 
 mkdir -p "$state_dir"
@@ -145,9 +176,14 @@ for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
         exit 3
       fi
       say "\e[32mRunning migration (${name%.sh}, your part)\e[0m"
+      rm -f "$needs_admin"
       if run_migration "$file" "$shims/lenient"; then
         touch "$marker"
         log_line "ran $name ($class, privileged part skipped)"
+      elif [[ -s $needs_admin ]]; then
+        log_line "waiting for an admin: $name ($class, for this account: $(head -1 "$needs_admin"))"
+        say "Migration ${name%.sh} needs an administrator to run, for your account: $(head -1 "$needs_admin")"
+        exit 3
       else
         log_line "FAILED $name ($class)"
         say "\e[31mMigration ${name%.sh} failed; see $log.\e[0m"

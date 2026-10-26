@@ -33,7 +33,7 @@ echo "System updates are done by an administrator. Applying your pending migrati
 omarchy-mu-migrate
 case $? in
   0) echo "Your account is up to date." ;;
-  3) echo "Some migrations are waiting for an administrator to run the update." ;;
+  3) echo "Some migrations are waiting for an administrator (see the message above)." ;;
   *) echo "A migration failed; see ~/.local/state/omarchy-multiuser/migrate.log." ;;
 esac
 echo
