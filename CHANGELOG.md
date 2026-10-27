@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Menu: Setup > Security > Fingerprint opens the fingerprint-omarchy
+  overlay (`omarchy-fingerprint`) when it's installed, and the terminal
+  enrollment otherwise.
+
 ## 0.3.0 (2026-10-27)
 
 More from Omarchy PR #16100.

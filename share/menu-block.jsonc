@@ -1,6 +1,8 @@
   // Per-user security setup (omarchy-multiuser): each user registers their own
   // FIDO2 key and fingerprints; machine-wide parts stay with administrators.
-  "setup.security.fingerprint": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fingerprint"},
+  // fingerprint-omarchy's overlay when installed; it doesn't touch PAM, which
+  // the terminal script still sets up for administrators.
+  "setup.security.fingerprint": {"action":"if command -v omarchy-fingerprint >/dev/null; then omarchy-fingerprint; else omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fingerprint; fi"},
   "setup.security.fido2": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fido2"},
   "remove.security.fingerprint": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-remove-security-fingerprint"},
   "remove.security.fido2": {"when":"omarchy-pkg-present pam-u2f && omarchy-mu-fido2-authfile has","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-remove-security-fido2"},
