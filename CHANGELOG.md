@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 (2026-10-27)
 
 - Menu: Setup > Security > Fido2 opens the
   [security-key-omarchy](https://github.com/lbssousa/security-key-omarchy)
