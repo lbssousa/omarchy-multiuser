@@ -41,6 +41,7 @@ test_sync_without_stock_theme_removes_override() {
 
 test_sync_lists_first_login_accounts() {
   setup_themes
+  # shellcheck disable=SC2016  # a literal shadow hash, not an expansion
   printf '%s\n' 'abutre:$6$hash:20000:0:99999:7:::' 'surubi::0:0:99999:7:::' \
     'coruja::0:0:99999:7:::' 'locked:!:0:0:99999:7:::' 'blank::20000:0:99999:7:::' >"$T/etc/shadow"
   omarchy-mu-sddm-sync >/dev/null
@@ -52,6 +53,7 @@ test_sync_drops_accounts_once_they_chose() {
   setup_themes
   printf '%s\n' 'surubi::0:0:99999:7:::' >"$T/etc/shadow"
   omarchy-mu-sddm-sync >/dev/null
+  # shellcheck disable=SC2016  # a literal shadow hash, not an expansion
   printf '%s\n' 'surubi:$6$hash:20000:0:99999:7:::' >"$T/etc/shadow"
   omarchy-mu-sddm-sync >/dev/null
   assert_not_contains "$(themes)/omarchy-multiuser/theme.conf.user" "passwordChangeUsers"
