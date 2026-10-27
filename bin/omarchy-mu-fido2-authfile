@@ -4,18 +4,24 @@
 # omarchy:requires-sudo=true
 # omarchy:hidden=true
 #
-# Usage (through sudo, as the omarchy-users sudoers rule allows):
+# Usage (through sudo, as the omarchy-users sudoers rule allows, or pkexec):
 #   pamu2fcfg -u "$USER" | sudo omarchy-mu-fido2-authfile add
 #   sudo omarchy-mu-fido2-authfile remove
+#   echo <key handle> | pkexec omarchy-mu-fido2-authfile remove-key
 #   omarchy-mu-fido2-authfile has [user]        (no root needed)
 #
 # Omarchy keeps one authfile, /etc/fido2/fido2, with a line per user
 # ("user:credential[:credential...]"); upstream's setup writes the whole file
 # for whoever runs it. This helper only ever touches one line: the one of the
-# user sudo says called it (SUDO_USER), never a name from the arguments or
-# stdin. An administrator (sudo from a wheel member, or a root shell) may
-# pass --user to act on someone else's line, as omarchy-mu-user-remove does;
-# the omarchy-users sudoers rule only allows the bare `add` and `remove`.
+# user sudo or pkexec says called it (SUDO_USER, PKEXEC_UID), never a name
+# from the arguments or stdin. An administrator (sudo or pkexec from a wheel
+# member, or a root shell) may pass --user to act on someone else's line, as
+# omarchy-mu-user-remove does; the omarchy-users sudoers rule only allows the
+# bare `add` and `remove`.
+#
+# pkexec is how security-key-omarchy's overlay, which has no terminal for
+# sudo, saves a key: the org.omarchy-multiuser.fido2-authfile action asks for
+# the user's own password, as sudo does.
 
 set -euo pipefail
 
@@ -25,10 +31,17 @@ source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 action=${1:-}
 shift || true
 
-target=${SUDO_USER:-}
+# Who called, as sudo or pkexec tells it.
+caller=${SUDO_USER:-}
+if [[ -z $caller && -n ${PKEXEC_UID:-} ]]; then
+  caller=$(getent passwd "$PKEXEC_UID" | cut -d: -f1) || true
+  [[ -n $caller ]] || omu_die "Unknown caller (uid $PKEXEC_UID)."
+fi
+
+target=$caller
 if [[ ${1:-} == --user ]]; then
-  if [[ -n ${SUDO_USER:-} ]]; then
-    omu_is_admin "$SUDO_USER" || omu_die "--user is only for administrators."
+  if [[ -n $caller ]]; then
+    omu_is_admin "$caller" || omu_die "--user is only for administrators."
   else
     (( EUID == 0 )) || omu_die "--user is only for administrators."
   fi
@@ -94,6 +107,27 @@ do_add() {
   echo "FIDO2 key registered for $user."
 }
 
+# Drops the one credential whose key handle (its first field) comes on stdin;
+# the line goes with its last credential.
+do_remove_key() {
+  local user=$1 handle existing cred kept=()
+  handle=$(head -c 4096)
+  handle=${handle%$'\n'}
+  [[ $handle =~ ^[A-Za-z0-9+/=_-]+$ ]] || omu_die "Expected one key handle."
+  existing=$(current "$user")
+  [[ -n $existing ]] || omu_die "No FIDO2 keys registered for $user."
+  IFS=':' read -r -a creds <<<"${existing#"$user:"}"
+  for cred in "${creds[@]}"; do
+    [[ -n $cred && ${cred%%,*} != "$handle" ]] && kept+=("$cred")
+  done
+  (( ${#kept[@]} < ${#creds[@]} )) || omu_die "No such key registered for $user."
+  {
+    others "$user"
+    (( ${#kept[@]} == 0 )) || (IFS=':'; printf '%s\n' "$user:${kept[*]}")
+  } | omu_atomic_write "$authfile" 644
+  echo "FIDO2 key removed for $user."
+}
+
 do_remove() {
   local user=$1 rest
   [[ -f $authfile ]] || { echo "No FIDO2 keys registered."; return 0; }
@@ -112,15 +146,15 @@ case $action in
     user=${1:-$(id -un)}
     [[ -n $(current "$user") ]]
     ;;
-  add|remove)
+  add|remove|remove-key)
     (( EUID == 0 )) || omu_die "Run through sudo: sudo omarchy-mu-fido2-authfile $action"
-    [[ -n $target ]] || omu_die "Can't tell which user called (no SUDO_USER)."
+    [[ -n $target ]] || omu_die "Can't tell which user called (no SUDO_USER or PKEXEC_UID)."
     valid_user "$target" || omu_die "Unknown user: $target"
     check_authdir
-    omu_with_lock fido2 "do_$action" "$target"
+    omu_with_lock fido2 "do_${action//-/_}" "$target"
     ;;
   *)
-    echo "Usage: omarchy-mu-fido2-authfile {add|remove|has [user]}" >&2
+    echo "Usage: omarchy-mu-fido2-authfile {add|remove|remove-key|has [user]}" >&2
     exit 2
     ;;
 esac

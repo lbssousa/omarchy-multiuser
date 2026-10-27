@@ -47,3 +47,13 @@ test("other programs and actions are left alone", () => {
   assert.equal(decide(EXEC, { program: "/usr/share/omarchy/bin/omarchy-update" }, []), null)
   assert.equal(decide("org.freedesktop.timedate1.set-timezone", BROWSER, []), null)
 })
+
+const FIDO2 = "org.omarchy-multiuser.fido2-authfile"
+
+test("FIDO2 authfile action only for wheel and omarchy-users", () => {
+  const decide = loadRules()
+  assert.equal(decide(FIDO2, {}, []), NO)
+  assert.equal(decide(FIDO2, {}, ["users"]), NO)
+  assert.equal(decide(FIDO2, {}, ["omarchy-users"]), null)
+  assert.equal(decide(FIDO2, {}, ["wheel"]), null)
+})

@@ -17,6 +17,7 @@ test_inserts_block_before_closing_brace() {
   valid_jsonc "$T/menu.jsonc"
   assert_contains "$T/menu.jsonc" '"about": {"label":"Mine"},'
   assert_contains "$T/menu.jsonc" omarchy-mu-setup-security-fido2
+  assert_contains "$T/menu.jsonc" "summon lbssousa.security-key"
   assert_eq "$(tail -1 "$T/menu.jsonc")" "}"
 }
 

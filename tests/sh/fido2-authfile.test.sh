@@ -70,6 +70,32 @@ test_refuses_symlinked_authfile() {
   assert_no_file "$T/elsewhere/target"
 }
 
+# As root with PKEXEC_UID, common.sh drops the OMU_* paths (the fake tree),
+# so only what fails before touching a file can be checked here.
+test_pkexec_unknown_caller_refused() {
+  out=$(echo "x:KH1,PK1" | PKEXEC_UID=2147483000 helper add 2>&1) && fail "accepted an unknown uid"
+  [[ $out == *"Unknown caller"* ]] || fail "unexpected error: $out"
+}
+
+test_remove_key_drops_one_credential_then_the_line() {
+  echo "$me:KH1,PK1,es256,+presence" | helper add --user "$me" >/dev/null
+  echo "$me:KH2,PK2,es256,+presence" | helper add --user "$me" >/dev/null
+  echo "root:KH1,PK9,es256,+presence" | helper add --user root >/dev/null
+  echo KH1 | helper remove-key --user "$me" >/dev/null || fail "remove-key failed"
+  assert_contains "$(authfile)" "$me:KH2,PK2,es256,+presence"
+  assert_not_contains "$(authfile)" "$me:KH1"
+  assert_contains "$(authfile)" "root:KH1,PK9,es256,+presence"
+  echo KH2 | helper remove-key --user "$me" >/dev/null || fail "second remove-key failed"
+  assert_eq "$(cat "$(authfile)")" "root:KH1,PK9,es256,+presence"
+}
+
+test_remove_key_rejects_unknown_and_junk() {
+  echo "$me:KH1,PK1,es256,+presence" | helper add --user "$me" >/dev/null
+  echo KHX | helper remove-key --user "$me" 2>/dev/null && fail "removed an unknown key"
+  echo 'KH1;x' | helper remove-key --user "$me" 2>/dev/null && fail "accepted junk"
+  assert_eq "$(cat "$(authfile)")" "$me:KH1,PK1,es256,+presence"
+}
+
 test_add_needs_root() {
   echo "$me:KH1,PK1" | "$REPO/bin/omarchy-mu-fido2-authfile" add 2>/dev/null && fail "ran without root"
   true

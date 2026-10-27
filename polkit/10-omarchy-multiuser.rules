@@ -9,6 +9,9 @@
 // leaves the browsers on the color an administrator's theme set; the theme
 // change logs the failure and carries on.
 //
+// The FIDO2 authfile action (org.omarchy-multiuser.fido2-authfile.policy)
+// is for the people sudoers lets run the helper: wheel and omarchy-users.
+//
 // Sorts before polkit's 50-default.rules, so this answers first.
 
 // ES5 only: polkitd may run rules on duktape.
@@ -20,6 +23,13 @@ polkit.addRule(function (action, subject) {
     if (action.id == "org.freedesktop.policykit.exec" &&
         OMU_ADMIN_ONLY_PROGRAMS.indexOf(action.lookup("program")) != -1 &&
         !subject.isInGroup("wheel")) {
+        return polkit.Result.NO;
+    }
+});
+
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.omarchy-multiuser.fido2-authfile" &&
+        !subject.isInGroup("wheel") && !subject.isInGroup("omarchy-users")) {
         return polkit.Result.NO;
     }
 });

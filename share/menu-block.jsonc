@@ -1,10 +1,11 @@
   // Per-user security setup (omarchy-multiuser): each user registers their own
   // FIDO2 key and fingerprints; machine-wide parts stay with administrators.
-  // fingerprint-omarchy's overlay when the shell has it (from its package or
-  // `omarchy plugin add`); it doesn't touch PAM, which the terminal script
-  // still sets up for administrators.
+  // fingerprint-omarchy's and security-key-omarchy's overlays when the shell
+  // has them (from their packages or `omarchy plugin add`); they don't touch
+  // PAM, which the terminal scripts still set up for administrators. The
+  // security key overlay saves through omarchy-mu-fido2-authfile (pkexec).
   "setup.security.fingerprint": {"action":"[[ $(omarchy-shell shell summon lbssousa.fingerprint '{}' 2>/dev/null) == ok ]] || omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fingerprint"},
-  "setup.security.fido2": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fido2"},
+  "setup.security.fido2": {"action":"[[ $(omarchy-shell shell summon lbssousa.security-key '{}' 2>/dev/null) == ok ]] || omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fido2"},
   "remove.security.fingerprint": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-remove-security-fingerprint"},
   "remove.security.fido2": {"when":"omarchy-pkg-present pam-u2f && omarchy-mu-fido2-authfile has","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-remove-security-fido2"},
   // System updates need an administrator; everyone else applies their migrations.

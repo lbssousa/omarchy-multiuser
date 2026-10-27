@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Menu: Setup > Security > Fido2 opens the
+  [security-key-omarchy](https://github.com/lbssousa/security-key-omarchy)
+  overlay whenever the shell has the `lbssousa.security-key` plugin, and the
+  terminal registration otherwise.
+- `omarchy-mu-fido2-authfile` also runs through `pkexec` (the caller from
+  `PKEXEC_UID`), with its own polkit action,
+  `org.omarchy-multiuser.fido2-authfile`, that asks for the user's own
+  password and is refused outside `wheel` and `omarchy-users`. That is how
+  the overlay, which has no terminal for sudo, saves keys in the shared
+  `/etc/fido2/fido2`. `remove-key` takes out one key, by the handle on
+  stdin, instead of the user's whole line.
 - Menu: the administrators-only gate follows Omarchy 4.5.0rc2's move of
   Style > Unlock to Appearance > Unlock (`appearance.unlock`).
 

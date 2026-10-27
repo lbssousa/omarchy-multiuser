@@ -43,6 +43,7 @@ package() {
   install -Dm644 -t "$pkgdir/etc/sddm.conf.d" etc/sddm.conf.d/zz-omarchy-multiuser.conf
   install -Dm440 -t "$pkgdir/etc/sudoers.d" etc/sudoers.d/omarchy-multiuser
   install -Dm644 -t "$pkgdir/usr/share/polkit-1/rules.d" polkit/10-omarchy-multiuser.rules
+  install -Dm644 -t "$pkgdir/usr/share/polkit-1/actions" polkit/*.policy
   install -Dm644 -t "$pkgdir/usr/lib/sysusers.d" sysusers.d/omarchy-multiuser.conf
   install -Dm644 -t "$pkgdir/usr/lib/tmpfiles.d" tmpfiles.d/omarchy-multiuser.conf
   install -Dm644 -t "$pkgdir/usr/lib/systemd/system" systemd/system/*

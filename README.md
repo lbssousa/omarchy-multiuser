@@ -64,6 +64,15 @@ Administrators are the members of `wheel`; everyone else is in
   the arguments), with their own password;
 - re-run `omarchy-mu-apply-lock`, which takes no input, without a password.
 
+The same helper also runs through `pkexec`, for the
+[security-key-omarchy](https://github.com/lbssousa/security-key-omarchy)
+overlay that *Setup › Security › Fido2* opens when the shell has it: there
+is no terminal for sudo there. Its polkit action
+(`org.omarchy-multiuser.fido2-authfile`) asks for the user's own password,
+the user comes from `PKEXEC_UID`, and `remove-key` takes out one key (its
+handle on stdin) instead of the whole line. The rules file refuses the
+action to anyone outside `wheel` and `omarchy-users`.
+
 Fingerprints need no root at all: fprintd lets a user in an active session
 enroll and delete their own.
 
