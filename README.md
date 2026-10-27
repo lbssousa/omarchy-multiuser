@@ -44,7 +44,7 @@ PAM reports as expired after that is added on the spot. An expired password
 that isn't empty can't be changed from the greeter (PAM would get the old
 password as the new one): log in on a text console for that.
 
-It keeps following **Style › Unlock**: the images come from the stock theme,
+It keeps following **Appearance › Unlock**: the images come from the stock theme,
 which `omarchy-plymouth-set` recolors, and `omarchy-mu-sddm-sync` (run by
 `omarchy-mu-sddm-sync.path`) copies its two colors into `theme.conf.user`.
 The recolor applies to everyone's login screen, so the menu offers it to

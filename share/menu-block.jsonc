@@ -11,7 +11,7 @@
   "update.omarchy": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-update"},
   // Machine-wide: the greeter recolor, packages, services, sudo and the disk
   // password are administrators' business.
-  "style.unlock": {"when":"omarchy-mu-is-admin"},
+  "appearance.unlock": {"when":"omarchy-mu-is-admin"},
   "install": {"when":"omarchy-mu-is-admin"},
   "setup.security.sshd": {"when":"omarchy-mu-is-admin"},
   "setup.security.sudoless-docker": {"when":"omarchy-mu-is-admin && omarchy-sudo-docker --configured"},

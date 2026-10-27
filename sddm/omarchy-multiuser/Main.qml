@@ -177,7 +177,7 @@ Rectangle {
     }
   }
 
-  // An image from the stock theme (recolored by Style > Unlock), or the
+  // An image from the stock theme (recolored by Appearance > Unlock), or the
   // packaged copy when the stock one is missing.
   component ThemeImage: Image {
     property string assetName

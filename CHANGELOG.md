@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Menu: the administrators-only gate follows Omarchy 4.5.0rc2's move of
+  Style > Unlock to Appearance > Unlock (`appearance.unlock`).
+
 ## 0.5.0 (2026-10-27)
 
 From Omarchy PR #16100.

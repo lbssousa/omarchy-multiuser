@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# omarchy:summary=Copy Style > Unlock's greeter colors and first-login accounts to the multi-user greeter
+# omarchy:summary=Copy Appearance > Unlock's greeter colors and first-login accounts to the multi-user greeter
 # omarchy:requires-sudo=true
 # omarchy:hidden=true
 #
-# omarchy-plymouth-set (Style > Unlock) recolors only the stock theme,
+# omarchy-plymouth-set (Appearance > Unlock) recolors only the stock theme,
 # /usr/share/sddm/themes/omarchy: it rewrites Main.qml's background color and
 # the PNGs, which are tinted to the theme's text color. The multi-user theme
 # already loads those PNGs from there; this writes the two colors to its
