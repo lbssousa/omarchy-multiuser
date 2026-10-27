@@ -17,7 +17,7 @@ points the Omarchy menu at them.
 | Migrations stall for users outside `wheel` | Run what they can, privileged parts gated on an admin's run (`omarchy-mu-migrate`) |
 | Root has the owner's password; ISO installs grant the owner sudo by name | Root locked while there are several accounts; sudo grants by name or UID removed with the account (`omarchy-mu-accounts`) |
 | Update lock per user, update log at a fixed `/tmp` path | One machine-wide lock for administrators' updates and migrations; another admin's log moved aside |
-| — | `omarchy-mu-user-add`, `omarchy-mu-user-remove`, `omarchy-mu-luks-enroll` |
+| — | `omarchy-mu-user-add`, `omarchy-mu-user-remove`, `omarchy-mu-user-admin`, `omarchy-mu-luks-enroll` |
 
 ## The greeter
 
@@ -110,6 +110,13 @@ administrators can open them.
   `/home`, so a kept home never passes to someone else. Adding an
   administrator writes `%wheel ALL=(ALL:ALL) ALL` when an ISO install only
   granted the owner by name.
+- **Administrator rights.** `omarchy-mu-user-admin <user> on|off`
+  (*Setup › Users › Administrator Rights*) adds the account to wheel,
+  writing the `%wheel` rule when it's missing, or takes it out: the grants
+  that would keep root outside wheel go first, as on removal, and the
+  account stays in `omarchy-users`. Open programs keep sudo until the
+  account logs out, so it offers to log them out. It won't take away your
+  own rights or the last administrator's.
 - **Updates.** `omarchy-mu-update` (Update › Omarchy) and the administrators'
   `omarchy-mu-migrate` hold `/run/lock/omarchy-mu-update.lock`. Upstream's
   own lock is per user. `/tmp/omarchy-update.log` belongs to whoever updated

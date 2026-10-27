@@ -51,6 +51,7 @@
   "setup.users": {"icon":"","label":"Users","when":"omarchy-mu-is-admin"},
   "setup.users.add": {"icon":"","label":"Add User","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-add"},
   "setup.users.remove": {"icon":"","label":"Remove User","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-remove"},
+  "setup.users.admin": {"icon":"","label":"Administrator Rights","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-admin"},
   "setup.users.luks": {"icon":"","label":"Disk Unlock Password","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-luks-enroll"},
   // This machine's per-user setup (omarchy-setup), when it is installed.
   "setup.omarchy-setup": {"icon":"","label":"Omarchy Setup","when":"command -v omarchy-setup-user","action":"omarchy-launch-floating-terminal-with-presentation omarchy-setup-user"},

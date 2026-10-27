@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# omarchy:summary=Give a user administrator rights or take them away
+# omarchy:requires-sudo=true
+#
+# Administrator means wheel membership. Giving it also writes the %wheel sudo
+# rule when an ISO install granted the owner sudo by name only. Taking it
+# away first deletes the sudo grants that would let the account keep root
+# outside wheel (omarchy-mu-accounts drop-grants, which also warns about
+# other rules naming it and the docker group), then leaves wheel, so a stop
+# part way never leaves a grant behind; the account stays in omarchy-users
+# for what non-admins may do. Programs keep the groups they started with, so
+# sudo goes on working in a session already open: it offers to end it.
+# Refuses to take your own rights away and the last administrator's.
+#
+# Usage: omarchy-mu-user-admin [<user> [on|off]]
+# Without arguments it asks.
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+omu_is_admin || omu_die "Only an administrator can change administrator rights."
+omu_hold_lock accounts || omu_die "Another account change is in progress."
+
+user="" state=""
+for arg in "$@"; do
+  case $arg in
+    -h|--help) sed -n '3,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
+    -*) omu_die "Unknown option: $arg" ;;
+    *)
+      if [[ -z $user ]]; then
+        user=$arg
+      elif [[ -z $state && ( $arg == on || $arg == off ) ]]; then
+        state=$arg
+      else
+        omu_die "Usage: omarchy-mu-user-admin [<user> [on|off]]"
+      fi
+      ;;
+  esac
+done
+
+if [[ -z $user ]]; then
+  mapfile -t candidates < <(omu_human_users)
+  user=$(gum choose --header "Change whose administrator rights?" "${candidates[@]}") || exit 1
+fi
+
+getent passwd "$user" >/dev/null || omu_die "No such user: $user"
+omu_human_users | grep -qx -- "$user" || omu_die "$user is a system account."
+
+current=off
+omu_is_admin "$user" && current=on
+
+if [[ -z $state ]]; then
+  if [[ $current == on ]]; then
+    gum confirm --default=false "Take administrator rights away from $user?" || exit 1
+    state=off
+  else
+    gum confirm --default=false "Make $user an administrator?" || exit 1
+    state=on
+  fi
+fi
+
+if [[ $state == on ]]; then
+  # Also for a member already: wheel alone gives no sudo on an install that
+  # granted it by name only.
+  sudo omarchy-mu-accounts ensure-wheel-sudo
+  if [[ $current == on ]]; then
+    echo "$user is already an administrator."
+    exit 0
+  fi
+  sudo gpasswd -a "$user" "$OMU_ADMIN_GROUP" >/dev/null
+  omu_info "$user is now an administrator, from their next login."
+  exit 0
+fi
+
+if [[ $current == off ]]; then
+  echo "$user isn't an administrator."
+  exit 0
+fi
+[[ $user != "$(id -un)" ]] || omu_die "You can't take away your own administrator rights; ask another administrator."
+omu_group_members "$OMU_ADMIN_GROUP" | grep -vqx -- "$user" ||
+  omu_die "$user is the last administrator; make someone else one first."
+# gpasswd can't take a user out of their primary group.
+admin_gid=$(getent group "$OMU_ADMIN_GROUP" | cut -d: -f3)
+[[ $(getent passwd "$user" | cut -d: -f4) != "$admin_gid" ]] ||
+  omu_die "$OMU_ADMIN_GROUP is $user's primary group; change it first (sudo usermod -g $user $user)."
+
+# The grants go before wheel does: a stop in between leaves an administrator,
+# and running this again finishes.
+sudo omarchy-mu-accounts drop-grants "$user"
+sudo gpasswd -d "$user" "$OMU_ADMIN_GROUP" >/dev/null
+sudo groupadd -f "$OMU_USERS_GROUP"
+omu_group_members "$OMU_USERS_GROUP" | grep -qx -- "$user" || sudo gpasswd -a "$user" "$OMU_USERS_GROUP" >/dev/null
+omu_info "$user is no longer an administrator."
+
+if loginctl show-user "$user" >/dev/null 2>&1; then
+  echo "$user is logged in, and their open programs keep sudo until they log out."
+  if gum confirm --default=false "Log $user out now?"; then
+    sudo loginctl terminate-user "$user"
+    echo "Logged $user out."
+  fi
+fi

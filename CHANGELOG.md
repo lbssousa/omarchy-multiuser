@@ -11,6 +11,10 @@ From Omarchy PR #16100.
 - Bar: the update icon, which only led users outside wheel to sudo's
   refusal, comes off their bar once (`omarchy-mu-update-widget-sync`, at
   login), and goes back where it was if they become administrators.
+- `omarchy-mu-user-admin <user> on|off` (*Setup › Users › Administrator
+  Rights*) gives or takes away administrator rights. Taking them deletes
+  the account's sudo grants before it leaves wheel, keeps it in
+  `omarchy-users`, and offers to log it out, since open programs keep sudo.
 
 ## 0.4.0 (2026-10-27)
 
