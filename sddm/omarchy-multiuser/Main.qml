@@ -4,10 +4,12 @@ import QtQuick 2.15
 import SddmComponents 2.0
 import "UserList.js" as UserList
 import "Strings.js" as Strings
+import "Password.js" as Password
 
 // Omarchy's greeter (upstream/sddm/omarchy/Main.qml) with a user list: every
 // account SDDM lists, by full name, plus an optional "Other user…" row that
-// reveals a username field. The password row is the stock one.
+// reveals a username field. The password row is the stock one, asked twice
+// for an account that chooses its password at this login (Password.js).
 Rectangle {
   id: root
   width: 640
@@ -36,6 +38,18 @@ Rectangle {
   readonly property bool otherSelected: selected !== null && selected.other === true
 
   property bool loginFailed: false
+  // Accounts with an empty, expired password, from omarchy-mu-sddm-sync,
+  // plus any PAM reports as one; for them the password box takes the new
+  // password and a second box confirms it.
+  property var changeUsers: Password.parseUsers(config.passwordChangeUsers)
+  readonly property string loginName: UserList.loginUser(selected, otherUser.text)
+  readonly property bool changeMode: Password.needsChange(changeUsers, loginName)
+  // PAM's "change your password" notice comes with a login failure from
+  // SDDM while the change goes on: that one failure is skipped.
+  property bool changeNoticeSeen: false
+  property string lastPamMessage: ""
+  // Shown under the boxes: what is wrong with the new password.
+  property string message: ""
   property int sessionIndex: {
     for (var i = 0; i < sessionModel.rowCount(); i++) {
       var name = (sessionModel.data(sessionModel.index(i, 0), Qt.DisplayRole) || "").toString()
@@ -64,8 +78,10 @@ Rectangle {
   function select(index) {
     selectionTouched = true
     selectedIndex = Math.max(0, Math.min(index, entries.length - 1))
-    password.text = ""
+    password.input.text = ""
+    confirm.input.text = ""
     loginFailed = false
+    message = ""
     focusInput()
   }
 
@@ -79,16 +95,32 @@ Rectangle {
     if (otherSelected && otherUser.text.trim().length === 0)
       otherUser.forceActiveFocus()
     else
-      password.forceActiveFocus()
+      password.input.forceActiveFocus()
   }
 
   function login() {
-    var user = UserList.loginUser(selected, otherUser.text)
+    var user = loginName
     if (user.length === 0) {
       otherUser.forceActiveFocus()
       return
     }
-    sddm.login(user, password.text, root.sessionIndex)
+    if (changeMode) {
+      var problem = Password.check(password.input.text, confirm.input.text)
+      if (problem !== "") {
+        // Clearing a box clears the message, so that goes first.
+        confirm.input.text = ""
+        message = Strings.t(localeName, problem === "empty" ? "emptyPassword" : "mismatch")
+        if (problem === "empty")
+          password.input.forceActiveFocus()
+        else
+          confirm.input.forceActiveFocus()
+        return
+      }
+    }
+    message = ""
+    lastPamMessage = ""
+    changeNoticeSeen = false
+    sddm.login(user, password.input.text, root.sessionIndex)
   }
 
   // Shared by both text fields: list navigation and Escape.
@@ -98,7 +130,8 @@ Rectangle {
     } else if (event.key === Qt.Key_Down) {
       moveSelection(1)
     } else if (event.key === Qt.Key_Escape) {
-      password.text = ""
+      password.input.text = ""
+      confirm.input.text = ""
     } else {
       return false
     }
@@ -108,10 +141,24 @@ Rectangle {
 
   Connections {
     target: sddm
+    function onInformationMessage(text) {
+      root.lastPamMessage = text
+      if (Password.isChangeNotice(text)) {
+        root.changeNoticeSeen = true
+        root.changeUsers = Password.withUser(root.changeUsers, root.loginName)
+      }
+    }
     function onLoginFailed() {
+      if (root.changeNoticeSeen) {
+        root.changeNoticeSeen = false
+        return
+      }
       root.loginFailed = true
-      password.text = ""
-      password.focus = true
+      password.input.text = ""
+      confirm.input.text = ""
+      if (root.changeMode)
+        root.message = root.lastPamMessage || Strings.t(root.localeName, "changeFailed")
+      password.input.forceActiveFocus()
     }
     function onLoginSucceeded() {
       root.loginFailed = false
@@ -142,6 +189,78 @@ Rectangle {
     }
   }
 
+  // A password box: the stock entry image with a bullet per character (the
+  // text itself is transparent), and a hint while it is empty.
+  component SecretField: Item {
+    id: field
+    property alias input: secret
+    property string placeholder: ""
+    signal keyPressed(var event)
+    width: fieldEntry.width
+    height: fieldEntry.height
+
+    ThemeImage {
+      id: fieldEntry
+      assetName: root.loginFailed ? "entry-failed.png" : "entry.png"
+      anchors.centerIn: parent
+    }
+
+    Row {
+      anchors.left: parent.left
+      anchors.leftMargin: 20
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: 5
+
+      Repeater {
+        model: Math.min(secret.text.length, 21)
+
+        ThemeImage {
+          assetName: "bullet.png"
+          width: 7
+          height: 7
+        }
+      }
+    }
+
+    Text {
+      text: field.placeholder
+      visible: secret.text.length === 0 && text.length > 0
+      color: root.textColor
+      opacity: 0.4
+      font.family: root.fontFamily
+      font.pixelSize: 22
+      anchors.left: parent.left
+      anchors.leftMargin: 20
+      anchors.verticalCenter: parent.verticalCenter
+    }
+
+    TextInput {
+      id: secret
+      anchors.fill: parent
+      anchors.leftMargin: 20
+      anchors.rightMargin: 20
+      verticalAlignment: TextInput.AlignVCenter
+      echoMode: TextInput.Password
+      font.family: root.fontFamily
+      font.pixelSize: 24
+      font.letterSpacing: 5
+      passwordCharacter: "•"
+      color: "transparent"
+      selectionColor: "transparent"
+      selectedTextColor: "transparent"
+      cursorDelegate: Item {}
+
+      onTextChanged: {
+        root.loginFailed = false
+        root.message = ""
+      }
+
+      Keys.onPressed: function (event) {
+        field.keyPressed(event)
+      }
+    }
+  }
+
   Column {
     anchors.centerIn: parent
     spacing: 40
@@ -162,7 +281,7 @@ Rectangle {
       ListView {
         id: userList
         readonly property int rowHeight: root.showUsername ? 52 : 36
-        width: entry.width
+        width: password.width
         height: Math.min(count, root.maxVisibleUsers) * rowHeight
         anchors.right: passwordRow.right
         clip: true
@@ -280,6 +399,17 @@ Rectangle {
         }
       }
 
+      Text {
+        width: password.width
+        anchors.right: passwordRow.right
+        text: Strings.t(root.localeName, "choosePassword")
+        visible: root.changeMode
+        color: root.textColor
+        wrapMode: Text.WordWrap
+        font.family: root.fontFamily
+        font.pixelSize: 18
+      }
+
       Row {
         id: passwordRow
         anchors.horizontalCenter: parent.horizontalCenter
@@ -293,65 +423,66 @@ Rectangle {
           anchors.verticalCenter: parent.verticalCenter
         }
 
-        Item {
-          width: entry.width
-          height: entry.height
+        SecretField {
+          id: password
+          placeholder: root.changeMode ? Strings.t(root.localeName, "newPassword") : ""
 
-          ThemeImage {
-            id: entry
-            assetName: root.loginFailed ? "entry-failed.png" : "entry.png"
-            anchors.centerIn: parent
-          }
-
-          Row {
-            anchors.left: parent.left
-            anchors.leftMargin: 20
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 5
-
-            Repeater {
-              model: Math.min(password.text.length, 21)
-
-              ThemeImage {
-                assetName: "bullet.png"
-                width: 7
-                height: 7
-              }
-            }
-          }
-
-          TextInput {
-            id: password
-            anchors.fill: parent
-            anchors.leftMargin: 20
-            anchors.rightMargin: 20
-            verticalAlignment: TextInput.AlignVCenter
-            echoMode: TextInput.Password
-            font.family: root.fontFamily
-            font.pixelSize: 24
-            font.letterSpacing: 5
-            passwordCharacter: "•"
-            color: "transparent"
-            selectionColor: "transparent"
-            selectedTextColor: "transparent"
-            cursorDelegate: Item {}
-            focus: true
-
-            onTextChanged: root.loginFailed = false
-
-            Keys.onPressed: function (event) {
-              if (root.handleCommonKey(event))
-                return
-              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+          onKeyPressed: function (event) {
+            if (root.handleCommonKey(event))
+              return
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              if (root.changeMode && password.input.text.length > 0 && confirm.input.text.length === 0)
+                confirm.input.forceActiveFocus()
+              else
                 root.login()
-                event.accepted = true
-              } else if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) && root.otherSelected) {
-                otherUser.forceActiveFocus()
-                event.accepted = true
-              }
+              event.accepted = true
+            } else if (event.key === Qt.Key_Tab && root.changeMode) {
+              confirm.input.forceActiveFocus()
+              event.accepted = true
+            } else if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) && root.otherSelected) {
+              otherUser.forceActiveFocus()
+              event.accepted = true
             }
           }
         }
+      }
+
+      // The new password again, only for an account choosing it now.
+      Item {
+        id: confirmRow
+        visible: root.changeMode
+        width: passwordRow.width
+        height: visible ? confirm.height : 0
+
+        SecretField {
+          id: confirm
+          anchors.right: parent.right
+          placeholder: Strings.t(root.localeName, "confirmPassword")
+          input.enabled: root.changeMode
+
+          onKeyPressed: function (event) {
+            if (root.handleCommonKey(event))
+              return
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+              root.login()
+              event.accepted = true
+            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+              password.input.forceActiveFocus()
+              event.accepted = true
+            }
+          }
+        }
+      }
+
+      Text {
+        width: password.width
+        anchors.right: passwordRow.right
+        text: root.message
+        visible: text.length > 0
+        color: root.textColor
+        wrapMode: Text.WordWrap
+        font.family: root.fontFamily
+        font.pixelSize: 16
       }
     }
   }

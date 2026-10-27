@@ -31,6 +31,18 @@ points the Omarchy menu at them.
 - a last **Outro usuário… / Other user…** row that reveals a username field;
 - ↑/↓ change the user from either field, Tab moves between username and
   password, Enter logs in, Esc clears the password, a click selects.
+- an account that chooses its password at this login — an empty, expired
+  password, from `passwd -d <user>; chage -d 0 <user>` — gets **Nova senha**
+  and **Repita a senha** boxes instead, and logs in once both match.
+
+SDDM has no way to show PAM's "new password" prompts: it answers every one
+with what was typed in the greeter. For such an account that text becomes
+the new password at once, so the greeter has it typed twice first.
+`omarchy-mu-sddm-sync` lists these accounts in `theme.conf.user`
+(`passwordChangeUsers`), rerun whenever `/etc/shadow` changes; an account
+PAM reports as expired after that is added on the spot. An expired password
+that isn't empty can't be changed from the greeter (PAM would get the old
+password as the new one): log in on a text console for that.
 
 It keeps following **Style › Unlock**: the images come from the stock theme,
 which `omarchy-plymouth-set` recolors, and `omarchy-mu-sddm-sync` (run by

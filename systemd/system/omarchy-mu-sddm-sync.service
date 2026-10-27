@@ -1,5 +1,5 @@
 [Unit]
-Description=Copy Style > Unlock colors to the multi-user greeter (omarchy-multiuser)
+Description=Copy Style > Unlock colors and first-login accounts to the multi-user greeter (omarchy-multiuser)
 
 [Service]
 Type=oneshot

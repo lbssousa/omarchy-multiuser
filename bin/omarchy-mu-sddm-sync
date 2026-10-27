@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# omarchy:summary=Copy Style > Unlock's greeter colors to the multi-user greeter
+# omarchy:summary=Copy Style > Unlock's greeter colors and first-login accounts to the multi-user greeter
 # omarchy:requires-sudo=true
 # omarchy:hidden=true
 #
@@ -13,9 +13,21 @@
 #   background  the first `color: "#rrggbb"` in the stock Main.qml
 #   textColor   the center pixel of the stock bullet.png
 #
-# Run by omarchy-mu-sddm-sync.path whenever the stock theme changes, by the
-# pacman hook and on package install. Without ImageMagick or the stock files
-# it leaves theme.conf's defaults alone.
+# and the accounts that must choose their password at the next login, which
+# the greeter asks for twice instead of the usual password:
+#
+#   passwordChangeUsers  accounts with an empty password that has to be
+#                        changed (`passwd -d <user>; chage -d 0 <user>`),
+#                        space-separated: QSettings reads "a,b" as a list,
+#                        and SDDM drops lists from theme.conf.user
+#
+# SDDM answers every PAM prompt with what was typed in the greeter, so for
+# such an account the new password is whatever goes in the box: the greeter
+# needs to know beforehand to have it confirmed.
+#
+# Run by omarchy-mu-sddm-sync.path whenever the stock theme or /etc/shadow
+# changes, by the pacman hook and on package install. Without ImageMagick or
+# the stock files it leaves theme.conf's colors alone.
 
 set -euo pipefail
 
@@ -40,9 +52,17 @@ if [[ -f $stock/bullet.png ]] && command -v magick >/dev/null; then
   [[ $hex =~ ^[0-9A-Fa-f]{6} ]] && text="#${hex:0:6}"
 fi
 
+# Empty password field (not "!" or "*": those are locked) and last change
+# on day 0, which is what `chage -d 0` sets.
+change_users=""
+if [[ -r $OMU_SHADOW ]]; then
+  change_users=$(awk -F: '$2 == "" && $3 == "0" { print $1 }' "$OMU_SHADOW" | paste -sd' ' -)
+fi
+
 content="[General]"
 [[ -n $background ]] && content+=$'\n'"background=$background"
 [[ -n $text ]] && content+=$'\n'"textColor=$text"
+[[ -n $change_users ]] && content+=$'\n'"passwordChangeUsers=$change_users"
 
 if [[ $content == "[General]" ]]; then
   rm -f "$conf"
@@ -52,4 +72,5 @@ fi
 if [[ ! -f $conf || $(<"$conf") != "$content" ]]; then
   printf '%s\n' "$content" | omu_atomic_write "$conf" 644
   echo "Greeter colors: background=${background:-default} text=${text:-default}"
+  [[ -z $change_users ]] || echo "Greeter asks for a new password: ${change_users// /, }"
 fi

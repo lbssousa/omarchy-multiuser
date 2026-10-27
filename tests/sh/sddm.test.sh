@@ -39,6 +39,32 @@ test_sync_without_stock_theme_removes_override() {
   assert_no_file "$(themes)/omarchy-multiuser/theme.conf.user"
 }
 
+test_sync_lists_first_login_accounts() {
+  setup_themes
+  printf '%s\n' 'abutre:$6$hash:20000:0:99999:7:::' 'surubi::0:0:99999:7:::' \
+    'coruja::0:0:99999:7:::' 'locked:!:0:0:99999:7:::' 'blank::20000:0:99999:7:::' >"$T/etc/shadow"
+  omarchy-mu-sddm-sync >/dev/null
+  conf="$(themes)/omarchy-multiuser/theme.conf.user"
+  assert_contains "$conf" "passwordChangeUsers=surubi coruja"
+}
+
+test_sync_drops_accounts_once_they_chose() {
+  setup_themes
+  printf '%s\n' 'surubi::0:0:99999:7:::' >"$T/etc/shadow"
+  omarchy-mu-sddm-sync >/dev/null
+  printf '%s\n' 'surubi:$6$hash:20000:0:99999:7:::' >"$T/etc/shadow"
+  omarchy-mu-sddm-sync >/dev/null
+  assert_not_contains "$(themes)/omarchy-multiuser/theme.conf.user" "passwordChangeUsers"
+}
+
+test_sync_keeps_first_login_accounts_without_colors() {
+  setup_themes
+  rm -rf "$(themes)/omarchy"
+  printf '%s\n' 'surubi::0:0:99999:7:::' >"$T/etc/shadow"
+  omarchy-mu-sddm-sync >/dev/null
+  assert_eq "$(cat "$(themes)/omarchy-multiuser/theme.conf.user")" $'[General]\npasswordChangeUsers=surubi'
+}
+
 test_guard_removes_autologin() {
   setup_themes
   cp "$REPO/etc/sddm.conf.d/zz-omarchy-multiuser.conf" "$T/etc/sddm.conf.d/"

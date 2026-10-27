@@ -10,6 +10,10 @@ More from Omarchy PR #16100.
 - Menu: for users outside wheel, the Remove entries that drop packages and
   the machine-wide Update entries (channel, firmware, time zone, time,
   Plymouth, trackpad) are hidden.
+- Greeter: accounts with an empty, expired password (`passwd -d`,
+  `chage -d 0`) choose their password at the login screen, typed twice.
+  `omarchy-mu-sddm-sync` lists them in `theme.conf.user` and its path unit
+  also watches `/etc/shadow`.
 
 ## 0.2.0 (2026-10-24)
 

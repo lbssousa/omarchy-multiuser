@@ -21,6 +21,7 @@ OMU_LOCK_DIR=${OMU_LOCK_DIR:-$OMU_ROOT/run/lock}
 OMU_SUDOERS_DIR=${OMU_SUDOERS_DIR:-$OMU_ROOT/etc/sudoers.d}
 OMU_HOME_DIR=${OMU_HOME_DIR:-$OMU_ROOT/home}
 OMU_LOGIN_DEFS=${OMU_LOGIN_DEFS:-$OMU_ROOT/etc/login.defs}
+OMU_SHADOW=${OMU_SHADOW:-$OMU_ROOT/etc/shadow}
 OMU_ADMIN_GROUP=${OMU_ADMIN_GROUP:-wheel}
 OMU_USERS_GROUP=${OMU_USERS_GROUP:-omarchy-users}
 # shellcheck disable=SC2034  # used by the scripts that source this

@@ -37,7 +37,7 @@ package() {
   install -Dm644 -t "$pkgdir/usr/share/omarchy-multiuser" share/*
 
   local theme=usr/share/sddm/themes/omarchy-multiuser
-  install -Dm644 -t "$pkgdir/$theme" sddm/omarchy-multiuser/{Main.qml,UserList.js,Strings.js,theme.conf,metadata.desktop}
+  install -Dm644 -t "$pkgdir/$theme" sddm/omarchy-multiuser/{Main.qml,UserList.js,Strings.js,Password.js,theme.conf,metadata.desktop}
   install -Dm644 -t "$pkgdir/$theme/fallback" sddm/omarchy-multiuser/fallback/*.png
 
   install -Dm644 -t "$pkgdir/etc/sddm.conf.d" etc/sddm.conf.d/zz-omarchy-multiuser.conf
