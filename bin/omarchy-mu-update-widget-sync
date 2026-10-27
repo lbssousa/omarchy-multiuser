@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# omarchy:summary=Keep the bar's update icon for administrators
+# omarchy:hidden=true
+#
+# The bar's omarchy.system-update widget lights up when an Omarchy update is
+# out, and a click runs omarchy-update, which for a user outside wheel only
+# ends in sudo's refusal. omarchy-mu-login runs this at every login:
+#
+#   - outside wheel, the widget comes off the bar once (omarchy plugin
+#     disable), and where it was is recorded in
+#     ~/.local/state/omarchy-multiuser/update-widget. A user who puts it back
+#     keeps it: the record says this already ran;
+#   - in wheel, a widget this took off goes back where it was, and the record
+#     goes, so a later demotion takes it off again.
+#
+# Usage: omarchy-mu-update-widget-sync
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+widget=omarchy.system-update
+state=${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-multiuser/update-widget
+config=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/shell.json
+# The shell reads Omarchy's own until the user has a file.
+[[ -f $config ]] || config=${OMARCHY_PATH:-/usr/share/omarchy}/config/omarchy/shell.json
+
+# "<section> <index>" of the widget in the bar, or nothing when it isn't there.
+placement() {
+  [[ -f $config ]] || return 0
+  jq -r --arg id "$widget" '
+    (.bar.layout // {}) | to_entries[] | .key as $section
+    | (.value // []) | to_entries[] | select(.value.id == $id)
+    | "\($section) \(.key)"' "$config" 2>/dev/null | head -1
+}
+
+# The widget is the running shell's to change, over its IPC, and at login it
+# may not be up yet.
+wait_for_shell() {
+  omarchy-notification-wait 30 || omu_die "omarchy-shell isn't answering; the update icon is left as it is."
+}
+
+if omu_is_admin; then
+  [[ -f $state ]] || exit 0
+  read -r section index <"$state" || true
+  if [[ -n ${section:-} && -z $(placement) ]]; then
+    wait_for_shell
+    omarchy-plugin-enable "$widget" --section "$section" --index "${index:-0}" >/dev/null
+  fi
+  rm -f -- "$state"
+else
+  [[ -f $state ]] && exit 0
+  where=$(placement)
+  if [[ -n $where ]]; then
+    wait_for_shell
+    omarchy-plugin-disable "$widget" >/dev/null
+  fi
+  mkdir -p "$(dirname "$state")"
+  printf '%s\n' "$where" >"$state"
+fi

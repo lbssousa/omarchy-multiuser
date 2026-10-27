@@ -8,6 +8,9 @@ From Omarchy PR #16100.
   omarchy-theme-set-browser-policy` outright, instead of being asked for an
   administrator's password at the first login and at every theme change.
   The browsers keep the color an administrator's theme set.
+- Bar: the update icon, which only led users outside wheel to sudo's
+  refusal, comes off their bar once (`omarchy-mu-update-widget-sync`, at
+  login), and goes back where it was if they become administrators.
 
 ## 0.4.0 (2026-10-27)
 

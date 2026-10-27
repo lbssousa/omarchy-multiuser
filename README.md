@@ -73,6 +73,13 @@ own home, such as web apps, TUIs and mise dev envs, stays), and
 **Update › Channel, Firmware, Timezone, Time**, *Config › Plymouth* and
 *Hardware › Trackpad*.
 
+The bar's update icon (`omarchy.system-update`), whose click runs
+`omarchy-update`, comes off their bar at their first login
+(`omarchy-mu-update-widget-sync`, run by `omarchy-mu-login`); put back by
+hand, it stays. Promoted to administrator, they get it back where it was.
+Omarchy's one-time *Update System* notice at an account's first login still
+shows.
+
 Polkit refuses them, without a password dialog, what only an administrator
 may do but Omarchy asks for in their own session
 (`/usr/share/polkit-1/rules.d/10-omarchy-multiuser.rules`): the browsers'
