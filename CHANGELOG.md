@@ -1,16 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-27)
 
-- Menu: Setup > Security > Fingerprint opens the fingerprint-omarchy overlay
-  whenever the shell has the `lbssousa.fingerprint` plugin, also when it came
-  from `omarchy plugin add` rather than the package.
-
-## Unreleased
-
-- Menu: Setup > Security > Fingerprint opens the fingerprint-omarchy
-  overlay (`omarchy-fingerprint`) when it's installed, and the terminal
-  enrollment otherwise.
+- Menu: Setup > Security > Fingerprint opens the
+  [fingerprint-omarchy](https://github.com/lbssousa/fingerprint-omarchy)
+  overlay whenever the shell has the `lbssousa.fingerprint` plugin, from its
+  package or from `omarchy plugin add`, and the terminal enrollment
+  otherwise.
 
 ## 0.3.0 (2026-10-27)
 
