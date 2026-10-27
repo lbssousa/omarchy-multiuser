@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+From Omarchy PR #16100.
+
+- Polkit: users outside wheel are refused `pkexec
+  omarchy-theme-set-browser-policy` outright, instead of being asked for an
+  administrator's password at the first login and at every theme change.
+  The browsers keep the color an administrator's theme set.
+
 ## 0.4.0 (2026-10-27)
 
 - Menu: Setup > Security > Fingerprint opens the

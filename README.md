@@ -73,6 +73,15 @@ own home, such as web apps, TUIs and mise dev envs, stays), and
 **Update › Channel, Firmware, Timezone, Time**, *Config › Plymouth* and
 *Hardware › Trackpad*.
 
+Polkit refuses them, without a password dialog, what only an administrator
+may do but Omarchy asks for in their own session
+(`/usr/share/polkit-1/rules.d/10-omarchy-multiuser.rules`): the browsers'
+machine-wide theme color, which every theme change and the first login
+write through `pkexec omarchy-theme-set-browser-policy`. Otherwise they'd
+be asked for an administrator's password, and an administrator should never
+type theirs into someone else's session. The browsers keep the color an
+administrator's theme set.
+
 ## Accounts and root
 
 `omarchy-mu-user-add` and `-remove` hold `/run/lock/omarchy-mu-accounts.lock`

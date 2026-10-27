@@ -1,0 +1,25 @@
+// omarchy-multiuser: what polkit refuses users outside wheel without asking.
+//
+// omarchy-theme-set runs omarchy-theme-set-browser at every theme change
+// (and the first login), which writes the browsers' machine-wide theme color
+// through omarchy-theme-set-browser-policy. With no terminal, that goes
+// through pkexec, and polkit would ask in the user's own session for an
+// administrator's password: one they can't give, and one an administrator
+// must never type into a session someone else controls. Refusing outright
+// leaves the browsers on the color an administrator's theme set; the theme
+// change logs the failure and carries on.
+//
+// Sorts before polkit's 50-default.rules, so this answers first.
+
+// ES5 only: polkitd may run rules on duktape.
+var OMU_ADMIN_ONLY_PROGRAMS = [
+    "/usr/bin/omarchy-theme-set-browser-policy",
+];
+
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.policykit.exec" &&
+        OMU_ADMIN_ONLY_PROGRAMS.indexOf(action.lookup("program")) != -1 &&
+        !subject.isInGroup("wheel")) {
+        return polkit.Result.NO;
+    }
+});
