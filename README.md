@@ -16,7 +16,7 @@ points the Omarchy menu at them.
 | `omarchy-apply-lock` drops fingerprint unlock if *the caller* has no prints | Kept while *any* user has prints (`omarchy-mu-apply-lock`, re-run by a path unit) |
 | Migrations stall for users outside `wheel` | Run what they can, privileged parts gated on an admin's run (`omarchy-mu-migrate`) |
 | Root has the owner's password; ISO installs grant the owner sudo by name | Root locked while there are several accounts; sudo grants by name or UID removed with the account (`omarchy-mu-accounts`) |
-| Update lock per user, update log at a fixed `/tmp` path | One machine-wide lock for administrators' updates and migrations; another admin's log moved aside |
+| Update lock per user, update log at a fixed `/tmp` path | One machine-wide lock for administrators' updates and migrations, also from the migrations notice; a finished update's log moved aside |
 | — | `omarchy-mu-user-add`, `omarchy-mu-user-remove`, `omarchy-mu-user-admin`, `omarchy-mu-luks-enroll` |
 
 ## The greeter
@@ -114,32 +114,49 @@ administrators can open them.
   for systemd's emergency shell.
 - **Sudo grants.** Removal deletes the installer's `NN_<user>` grant and
   `omarchy-sudo-passwordless`' `99-omarchy-*nopasswd-<uid>` rules before
-  `userdel`, and warns about other sudoers rules naming the account or its
-  `docker` membership. New accounts get the lowest UID that owns nothing in
-  `/home`, so a kept home never passes to someone else. Adding an
-  administrator writes `%wheel ALL=(ALL:ALL) ALL` when an ISO install only
-  granted the owner by name.
+  `userdel`, and warns about other sudoers rules naming the account. New accounts get the lowest UID that owns nothing in
+  `/home`, so a kept home never passes to someone else, and a name whose
+  group or `/home` folder still exists is refused. Adding an administrator
+  writes `%wheel ALL=(ALL:ALL) ALL` when an ISO install only granted the owner
+  by name.
+- **Removing.** `omarchy-mu-user-remove` asks whether to delete the home
+  (`--keep-home` and `--delete-home` answer for it; keeping is the default
+  answer), and every question comes before anything changes. An account with
+  programs running, in a session or not, is logged out if you agree, and its
+  lingering turned off. A home holding the note of an unfinished disk password
+  change (`drive-password.state`) isn't deleted. System accounts are refused,
+  and the last administrator is the last one who can log in.
 - **Administrator rights.** `omarchy-mu-user-admin <user> on|off`
   (*Setup › Users › Administrator Rights*) adds the account to wheel,
   writing the `%wheel` rule when it's missing, or takes it out: the grants
   that would keep root outside wheel go first, as on removal, and the
-  account stays in `omarchy-users`. Open programs keep sudo until the
+  account stays in `omarchy-users`. It then fails, rather than say the rights
+  are gone, when `sudo -l -U` still shows a rule for every command (also one
+  for a group) or the account is in `docker`. Open programs keep sudo until the
   account logs out, so it offers to log them out. It won't take away your
-  own rights or the last administrator's.
+  own rights or the last administrator's. Administrator checks go by the
+  session's groups, as sudo does, so a change applies at the next login.
 - **Updates.** `omarchy-mu-update` (Update › Omarchy) and the administrators'
   `omarchy-mu-migrate` hold `/run/lock/omarchy-mu-update.lock`. Upstream's
   own lock is per user. `/tmp/omarchy-update.log` belongs to whoever updated
-  first and nobody else can open it, so it is moved to
-  `/tmp/omarchy-update.log.<owner>` for the next administrator. Running
-  `omarchy-update` directly bypasses both.
+  first and nobody else can open it, so `omarchy-mu-update-log.path` moves it
+  to `/tmp/omarchy-update.log.<owner>` when each update ends. The bar's icon
+  and the first-login notice run `omarchy-update` directly, so those updates
+  get this but not the machine-wide lock.
 
 ## Migrations
 
 `omarchy-update` (system packages, then migrations) is for administrators.
 Their markers are mirrored into `/var/lib/omarchy-multiuser/migrations` by
-`omarchy-mu-migrate-record@<admin>.path`. For everyone else, the login
-notifier (a drop-in on `omarchy-migrate-notify.service`) runs
-`omarchy-mu-migrate`, which classifies each migration as it goes
+`omarchy-mu-migrate-record@<admin>.path`, which follows who is an administrator
+(`omarchy-mu-accounts sync-migration-watchers`, run by the account commands and
+when the package installs). What an account had marked before becoming an
+administrator doesn't count, except for the machine's first administrator:
+Omarchy's first setup marks every migration done without running any. The login
+notifier (a drop-in on
+`omarchy-migrate-notify.service`) waits out a running update and offers
+administrators `omarchy-mu-migrate`, which takes the machine-wide lock. For
+everyone else it runs `omarchy-mu-migrate` itself, which classifies each migration as it goes
 (`lib/omarchy-multiuser/migrations.sh`; corrections in
 `share/migrations-overrides.tsv`):
 
@@ -164,7 +181,6 @@ just test
 just package
 sudo pacman -U packaging/omarchy-multiuser-*.pkg.tar.zst
 sudo systemctl enable --now omarchy-mu-sddm-guard.path omarchy-mu-sddm-sync.path omarchy-mu-apply-lock.path
-sudo systemctl enable --now omarchy-mu-migrate-record@$USER.path
 sudo systemctl --global enable omarchy-mu-login.service
 sudo usermod -aG omarchy-users <each non-admin user>
 ```
@@ -172,6 +188,9 @@ sudo usermod -aG omarchy-users <each non-admin user>
 [omarchy-setup](https://github.com/lbssousa/omarchy-setup) does all of this
 from a signed release tag (`just omarchy-multiuser`). The greeter takes over
 at the next login screen; sddm is never restarted from under open sessions.
+
+The package itself enables `omarchy-mu-update-log.path` and each
+administrator's `omarchy-mu-migrate-record@<admin>.path`.
 
 Try the greeter in a window first: `just greeter`.
 

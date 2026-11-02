@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0 (2026-11-02)
+
+More from Omarchy PR #16100, and what reading it showed was missing here.
+
+- Migrations: every administrator's are recorded, not only those of whoever
+  was enabled by hand: `omarchy-mu-migrate-record@<admin>.path` follows wheel
+  (`omarchy-mu-accounts sync-migration-watchers`, run when adding, promoting,
+  demoting and removing, and on upgrading to this version). Markers an account
+  had before becoming an administrator don't count, as its first setup marks
+  every migration done without running any; the machine's first administrator
+  is the exception.
+- `omarchy-mu-user-remove` refuses system accounts, asks whether to delete the
+  home instead of always deleting it (without an option, **keeping** is now the
+  default answer; `--delete-home` is new), won't delete a home holding an
+  unfinished disk password change's note, and logs out an account with programs
+  running, lingering included, before anything changes. When `userdel` removes
+  the account but not its home, the rest still finishes.
+- `omarchy-mu-user-add` refuses a name whose group or `/home` folder exists.
+- `omarchy-mu-user-admin off` fails instead of saying the rights are gone when
+  `sudo -l -U` still shows a rule for every command, whatever it names, or the
+  account is in `docker`, also as its primary group. Logging out also ends
+  programs outside a session.
+- The last administrator is the last one who can log in, and an administrator
+  through the primary group counts.
+- Administrator checks without a user go by the session's groups, like sudo.
+- Administrators' migrations notice: waits out a running update, counts again,
+  and a click runs `omarchy-mu-migrate`, under the machine-wide lock.
+- `omarchy-mu-update-log.path` moves a finished update's log aside, also for an
+  update started from the bar, which used to block the next administrator.
+
 ## 0.6.0 (2026-10-27)
 
 - Menu: Setup > Security > Fido2 opens the
