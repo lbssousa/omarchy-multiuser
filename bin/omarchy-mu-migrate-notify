@@ -5,15 +5,75 @@
 #
 # Replaces omarchy-migrate-notify's ExecStart through the package's drop-in
 # (systemd/user/omarchy-migrate-notify.service.d). Administrators get
-# upstream's notifier, which offers to run omarchy-migrate. Everyone else has
-# omarchy-mu-migrate apply what they can on their own, and is notified only
-# when a migration actually fails; one waiting for an administrator's
-# omarchy-update stays pending quietly and is retried at the next login.
+# upstream's notice, except that a click runs omarchy-mu-migrate, under the
+# machine-wide lock, and it waits for any update running now and counts what
+# is still pending after it. Everyone else has omarchy-mu-migrate apply what
+# they can on their own, and is notified only when a migration actually fails;
+# one waiting for an administrator's omarchy-update stays pending quietly and
+# is retried at the next login.
 
 set -uo pipefail
 
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+# The machine-wide lock, and the per-user one omarchy-update takes by itself.
+update_locks() {
+  local file
+  for file in "$OMU_LOCK_DIR/omarchy-mu-update.lock" "${XDG_RUNTIME_DIR:-}/omarchy-update.lock"; do
+    if [[ -f $file && -r $file ]]; then
+      echo "$file"
+    fi
+  done
+}
+
+wait_for_updates() {
+  local file fd
+  while read -r file; do
+    exec {fd}<"$file" || continue
+    flock -s "$fd"
+    exec {fd}<&-
+  done < <(update_locks)
+}
+
+updates_running() {
+  local file fd busy=1
+  while read -r file; do
+    exec {fd}<"$file" || continue
+    flock -n -s "$fd" || busy=0
+    exec {fd}<&-
+  done < <(update_locks)
+  return "$busy"
+}
+
+notify_administrator() {
+  local pending count message
+
+  while :; do
+    wait_for_updates
+    pending=$(omarchy-migrate --pending 2>/dev/null) || return 0
+    count=$(printf '%s\n' "$pending" | sed '/^[[:space:]]*$/d' | wc -l)
+    message=$(omarchy-i18n --count "$count" migrate.clickToRun "$count")
+
+    # The target can be reached before the shell has claimed
+    # org.freedesktop.Notifications, and without the wait the notice is lost.
+    omarchy-notification-wait || true
+
+    # That wait is long enough for an update to start, which makes the count
+    # stale, so wait it out and count again.
+    updates_running || break
+  done
+
+  omarchy-notification-send -u critical -g  "$(omarchy-i18n migrate.pending)" "$message" \
+    --exec omarchy-launch-floating-terminal-with-presentation omarchy-mu-migrate && return 0
+
+  echo "Omarchy has pending migrations. Run omarchy-mu-migrate in a terminal to apply them:" >&2
+  printf '  %s\n' "${pending//$'\n'/$'\n'  }" >&2
+}
+
 if omarchy-mu-is-admin; then
-  exec /usr/bin/omarchy-migrate-notify
+  notify_administrator
+  exit 0
 fi
 
 omarchy-mu-migrate --quiet
