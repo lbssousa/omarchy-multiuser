@@ -1,63 +1,15 @@
 #!/bin/bash
 # shellcheck disable=SC2031  # $T is set by run_tests in the subshell each test runs in
 # omarchy-mu-user-admin against a fake tree: getent, id, gpasswd and groupadd
-# read and edit $T/etc, sudo runs the command as is, and loginctl and gum
-# answer from $LOGGED_IN and $GUM_ANSWERS.
+# read and edit $T/etc, sudo runs the command as is, and pgrep and gum answer
+# from $T/running and $T/gum-answers (see user-stubs.sh).
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
+# shellcheck source=user-stubs.sh
+source "$(dirname "$0")/user-stubs.sh"
 
 setup() {
-  mkdir -p "$T/stubs" "$T/etc/sudoers.d" "$T/run/lock"
-  : >"$T/run/lock/omarchy-mu-accounts.lock"
-  cat >"$T/stubs/getent" <<'STUB'
-#!/bin/bash
-db=$T/etc/$1
-[[ -f $db ]] || exit 2
-if (( $# == 1 )); then cat "$db"; exit 0; fi
-awk -F: -v k="$2" '$1 == k || $3 == k { print; found = 1 } END { exit !found }' "$db"
-STUB
-  cat >"$T/stubs/id" <<'STUB'
-#!/bin/bash
-case $1 in
-  -un) echo "$ME" ;;
-  -nG) awk -F: -v u="${2:-$ME}" '{ n = split($4, m, ","); for (i = 1; i <= n; i++) if (m[i] == u) print $1 }' "$T/etc/group" | paste -sd' ' ;;
-  *) exit 2 ;;
-esac
-STUB
-  cat >"$T/stubs/gpasswd" <<'STUB'
-#!/bin/bash
-echo "gpasswd $*" >>"$T/calls"
-awk -F: -v OFS=: -v op="$1" -v u="$2" -v g="$3" '
-  $1 == g {
-    n = split($4, m, ","); out = ""
-    for (i = 1; i <= n; i++) if (m[i] != u) out = out (out == "" ? "" : ",") m[i]
-    if (op == "-a") out = out (out == "" ? "" : ",") u
-    $4 = out
-  } { print }' "$T/etc/group" >"$T/etc/group.new" && mv "$T/etc/group.new" "$T/etc/group"
-STUB
-  cat >"$T/stubs/groupadd" <<'STUB'
-#!/bin/bash
-grep -q "^$2:" "$T/etc/group" || echo "$2:x:950:" >>"$T/etc/group"
-STUB
-  cat >"$T/stubs/sudo" <<'STUB'
-#!/bin/bash
-"$@"
-STUB
-  cat >"$T/stubs/loginctl" <<'STUB'
-#!/bin/bash
-echo "loginctl $*" >>"$T/calls"
-[[ $1 == show-user && " ${LOGGED_IN:-} " == *" $2 "* ]] || [[ $1 == terminate-user ]]
-STUB
-  # One answer per call: y or n.
-  cat >"$T/stubs/gum" <<'STUB'
-#!/bin/bash
-echo "gum $*" >>"$T/calls"
-answer=$(head -1 "$T/gum-answers"); sed -i 1d "$T/gum-answers"
-[[ $answer == y ]]
-STUB
-  : >"$T/gum-answers"
-  chmod +x "$T/stubs/"*
-  export PATH="$T/stubs:$PATH" ME=owner
+  user_stubs
   printf 'root:x:0:0::/root:/bin/bash\nowner:x:1000:1000::/home/owner:/bin/bash\nbob:x:1001:1001::/home/bob:/bin/bash\n' >"$T/etc/passwd"
   printf 'wheel:x:998:owner\nomarchy-users:x:950:owner,bob\ndocker:x:970:\n' >"$T/etc/group"
 }
@@ -91,14 +43,74 @@ test_demote_drops_grants_first() {
 test_demote_offers_to_log_out() {
   setup
   sed -i 's/^wheel:x:998:owner$/wheel:x:998:owner,bob/' "$T/etc/group"
+  echo bob >"$T/running"
   echo n >"$T/gum-answers"
-  LOGGED_IN=bob omarchy-mu-user-admin bob off >"$T/out" 2>&1 || fail "exit $?"
-  assert_contains "$T/out" "keep sudo until they log out"
+  omarchy-mu-user-admin bob off >"$T/out" 2>&1 || fail "exit $?"
+  assert_contains "$T/out" "keep sudo until bob logs out"
   assert_not_contains "$T/calls" terminate-user
   sed -i 's/^wheel:x:998:owner$/wheel:x:998:owner,bob/' "$T/etc/group"
   echo y >"$T/gum-answers"
-  LOGGED_IN=bob omarchy-mu-user-admin bob off >"$T/out" 2>&1 || fail "exit $?"
+  omarchy-mu-user-admin bob off >"$T/out" 2>&1 || fail "exit $?"
   assert_contains "$T/calls" "loginctl terminate-user bob"
+  assert_no_file "$T/still-running"
+}
+
+test_demote_says_when_programs_survive_logout() {
+  setup
+  sed -i 's/^wheel:x:998:owner$/wheel:x:998:owner,bob/' "$T/etc/group"
+  echo bob >"$T/running"
+  echo bob >"$T/unkillable"
+  echo y >"$T/gum-answers"
+  omarchy-mu-user-admin bob off >"$T/out" 2>&1 && fail "said it logged bob out"
+  assert_contains "$T/calls" "pkill -KILL -u bob"
+  assert_contains "$T/out" "still running and keep sudo"
+}
+
+test_demote_fails_while_something_else_leads_to_root() {
+  setup
+  sed -i 's/^wheel:x:998:owner$/wheel:x:998:owner,bob/' "$T/etc/group"
+  printf 'User bob may run the following commands:\n    (ALL : ALL) ALL\n' >"$T/sudo-l"
+  omarchy-mu-user-admin bob off >"$T/out" 2>&1 && fail "said the rights were gone"
+  assert_contains "$T/out" "still gives bob full sudo"
+  assert_not_contains "$T/out" "no longer an administrator"
+  assert_eq "$(members wheel)" "owner"
+  rm "$T/sudo-l"
+  sed -i 's/^wheel:x:998:owner$/wheel:x:998:owner,bob/; s/^docker:x:970:$/docker:x:970:bob/' "$T/etc/group"
+  omarchy-mu-user-admin bob off >"$T/out" 2>&1 && fail "said the rights were gone with docker"
+  assert_contains "$T/out" "docker group"
+  assert_not_contains "$T/out" "no longer an administrator"
+}
+
+test_rights_and_migration_watcher_go_together() {
+  setup
+  omarchy-mu-user-admin bob on >/dev/null 2>&1 || fail "exit $?"
+  assert_watched bob
+  omarchy-mu-user-admin bob off >/dev/null 2>&1 || fail "exit $?"
+  assert_not_watched bob
+  assert_watched owner
+  # Running it on a current administrator repairs a machine that lacks it.
+  rm "$(watcher owner)"
+  omarchy-mu-user-admin owner on >/dev/null 2>&1 || fail "exit $?"
+  assert_watched owner
+}
+
+test_last_admin_ignores_accounts_without_a_login() {
+  setup
+  printf 'svc:x:900:900::/var/lib/svc:/usr/bin/nologin\n' >>"$T/etc/passwd"
+  sed -i 's/^wheel:x:998:owner$/wheel:x:998:bob,svc/' "$T/etc/group"
+  # owner's session started while in wheel; of the accounts, only bob is left.
+  echo wheel >"$T/session-groups"
+  omarchy-mu-user-admin bob off 2>"$T/err" && fail "took the last administrator's rights"
+  assert_contains "$T/err" "bob is the last administrator"
+  assert_eq "$(members wheel)" "bob,svc"
+}
+
+test_administrator_through_primary_group_counts() {
+  setup
+  printf 'carol:x:1002:998::/home/carol:/bin/bash\n' >>"$T/etc/passwd"
+  sed -i 's/^wheel:x:998:owner$/wheel:x:998:bob/' "$T/etc/group"
+  ME=carol omarchy-mu-user-admin bob off >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_eq "$(members wheel)" ""
 }
 
 test_refusals() {

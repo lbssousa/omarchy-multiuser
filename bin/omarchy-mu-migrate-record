@@ -8,7 +8,8 @@
 # administrator's ~/.local/state/omarchy/migrations changes (that is, after
 # their omarchy-migrate). Mirrors their markers into
 # /var/lib/omarchy-multiuser/migrations, which omarchy-mu-migrate reads to know
-# a privileged migration's machine-wide part is done.
+# a privileged migration's machine-wide part is done. Markers they had before
+# becoming an administrator don't count (omarchy-mu-accounts' baseline).
 #
 # Usage: omarchy-mu-migrate-record <admin-user>
 
@@ -27,12 +28,14 @@ home=$(getent passwd "$user" | cut -d: -f6)
 [[ -n $home ]] || omu_die "Unknown user: $user"
 markers=$OMU_ROOT$home/.local/state/omarchy/migrations
 [[ -d $markers ]] || exit 0
+baseline=$OMU_MIGRATION_BASELINES/$user
 
 install -d -m 755 "$OMU_MIGRATION_REGISTRY"
 for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
   [[ -f $file ]] || continue
   name=$(basename "$file")
-  if [[ -f $markers/$name && ! -e $OMU_MIGRATION_REGISTRY/$name ]]; then
+  if [[ -f $markers/$name && ! -e $OMU_MIGRATION_REGISTRY/$name ]] &&
+    ! grep -qxF -- "$name" "$baseline" 2>/dev/null; then
     touch "$OMU_MIGRATION_REGISTRY/$name"
     chmod 644 "$OMU_MIGRATION_REGISTRY/$name"
   fi

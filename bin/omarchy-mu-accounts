@@ -15,8 +15,16 @@
 #                      installer's NN_<user> grant and omarchy-sudo-passwordless'
 #                      99-omarchy-*nopasswd-<uid> rules, which name the UID and
 #                      would pass to the next account given it; then warn
-#                      about other sudoers rules naming <user> and the docker
-#                      group, which still lead to root
+#                      about other sudoers rules naming <user>
+#   check-root <user>  fail, saying why, when <user> outside wheel still
+#                      reaches root: a sudo rule for every command, whatever
+#                      it names (a group, say), or the docker group
+#   sync-migration-watchers
+#                      omarchy-mu-migrate-record@<admin>.path enabled for
+#                      every administrator and for nobody else; the markers
+#                      an administrator already has by then are set aside, since
+#                      an account's first setup marks every migration done
+#                      without running any, except for the machine's first
 #   lock-root          lock root's password: with several people, whoever
 #                      knew the owner's password would reach root without
 #                      being in wheel
@@ -25,12 +33,15 @@
 #                      setup), but only when it is the caller's and an
 #                      administrator's
 #
-# Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|lock-root|root-sync
+# Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|check-root <user>|
+#                            sync-migration-watchers|lock-root|root-sync
 
 set -euo pipefail
 
 # shellcheck source=../lib/omarchy-multiuser/common.sh
 source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+# shellcheck source=../lib/omarchy-multiuser/migrations.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/migrations.sh"
 
 if (( EUID != 0 )) && [[ -z $OMU_ROOT ]]; then
   exec sudo "$0" "$@"
@@ -79,9 +90,78 @@ drop_grants() {
       echo "Warning: ${file#"$OMU_ROOT"} still names $user; check it with visudo." >&2
     fi
   done
-  if omu_group_members docker | grep -qx "$user"; then
-    echo "Warning: $user is in the docker group, which is as good as root (gpasswd -d $user docker)." >&2
+}
+
+check_root() {
+  local user=$1 privileges status=0
+  # An account sudo doesn't know answers with text, whatever the exit status.
+  privileges=$(sudo -l -U "$user" 2>/dev/null) || true
+  if [[ -z $privileges ]]; then
+    echo "Warning: couldn't ask sudo what $user may run; check with sudo -l -U $user." >&2
+    status=1
+  # Root among the users it may run as, with any group after them, any tags
+  # (NOPASSWD:, SETENV:...) and any exceptions after a comma, still runs
+  # anything else as root.
+  elif grep -qE '^[[:space:]]+\(([^):]*,[[:space:]]*)?(ALL|root)([[:space:]]*,[^):]*)?([[:space:]]*:[^)]*)?\) ([A-Z_]+:[[:space:]]*)*ALL(,|$)' <<<"$privileges"; then
+    echo "Warning: another sudo rule still gives $user full sudo; see sudo -l -U $user." >&2
+    status=1
   fi
+  if omu_in_group "$user" docker; then
+    echo "Warning: $user is in the docker group, which is as good as root (gpasswd -d $user docker)." >&2
+    status=1
+  fi
+  return "$status"
+}
+
+# Each administrator's markers are how the machine learns a migration ran, so
+# one without a watcher could update and leave the others waiting for good.
+# The enabled instances are read from WantedBy's symlinks.
+#
+# omarchy-provision-user --first-install marks every migration done without
+# running any, and an account outside wheel skips the privileged parts, so what
+# an account has marked by the time it becomes an administrator says nothing
+# about the machine. omarchy-mu-migrate-record ignores those markers. The first
+# administrator has nobody to wait for: the machine's history is theirs.
+take_baseline() {
+  local user=$1 wants=$2 file=$OMU_MIGRATION_BASELINES/$1 home markers
+  [[ ! -e $file ]] || return 0
+  if ! compgen -G "$wants/omarchy-mu-migrate-record@*.path" >/dev/null &&
+    ! compgen -G "$OMU_MIGRATION_REGISTRY/*" >/dev/null; then
+    return 0
+  fi
+  home=$(getent passwd "$user" | cut -d: -f6)
+  markers=$OMU_ROOT$home/.local/state/omarchy/migrations
+  install -d -m 755 "$OMU_MIGRATION_BASELINES" || return 1
+  { find "$markers" -maxdepth 1 -type f -printf '%f\n' 2>/dev/null || true; } | omu_atomic_write "$file" 644
+}
+
+sync_migration_watchers() {
+  local wants=$OMU_ROOT/etc/systemd/system/multi-user.target.wants link unit user file status=0
+  # Becoming an administrator again sets aside what was marked in between.
+  for file in "$OMU_MIGRATION_BASELINES"/*; do
+    [[ -f $file ]] || continue
+    omu_is_admin "${file##*/}" || rm -f -- "$file" || status=1
+  done
+  for link in "$wants"/omarchy-mu-migrate-record@*.path; do
+    [[ -L $link ]] || continue
+    unit=${link##*/}
+    user=${unit#*@}
+    user=${user%.path}
+    if ! omu_is_admin "$user"; then
+      systemctl disable --now --quiet "$unit" || status=1
+    fi
+  done
+  while read -r user; do
+    unit=omarchy-mu-migrate-record@$user.path
+    if [[ ! -L $wants/$unit ]]; then
+      if take_baseline "$user" "$wants"; then
+        systemctl enable --now --quiet "$unit" || status=1
+      else
+        status=1
+      fi
+    fi
+  done < <(omu_admins)
+  return "$status"
 }
 
 root_hash() {
@@ -130,7 +210,12 @@ case ${1:-} in
     [[ -n ${2:-} ]] || omu_die "Usage: omarchy-mu-accounts drop-grants <user>"
     drop_grants "$2"
     ;;
+  check-root)
+    [[ -n ${2:-} ]] || omu_die "Usage: omarchy-mu-accounts check-root <user>"
+    check_root "$2"
+    ;;
+  sync-migration-watchers) sync_migration_watchers ;;
   lock-root) lock_root ;;
   root-sync) root_sync ;;
-  *) omu_die "Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|lock-root|root-sync" ;;
+  *) omu_die "Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|check-root <user>|sync-migration-watchers|lock-root|root-sync" ;;
 esac

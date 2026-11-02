@@ -14,6 +14,8 @@ OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
 OMU_MIGRATIONS_DIR=${OMU_MIGRATIONS_DIR:-$OMARCHY_PATH/migrations}
 OMU_MIGRATION_OVERRIDES=${OMU_MIGRATION_OVERRIDES:-$OMU_SHARE/migrations-overrides.tsv}
 OMU_MIGRATION_REGISTRY=${OMU_MIGRATION_REGISTRY:-$OMU_STATE_DIR/migrations}
+# Per administrator: the markers they already had when they became one.
+OMU_MIGRATION_BASELINES=${OMU_MIGRATION_BASELINES:-$OMU_STATE_DIR/migration-baselines}
 
 declare -gA _omu_requires_sudo=()
 

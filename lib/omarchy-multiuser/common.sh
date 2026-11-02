@@ -36,15 +36,56 @@ omu_info() {
   echo -e "\e[32m$*\e[0m"
 }
 
-# omu_is_admin [user] — member of the admin group (wheel).
+# omu_is_admin [user] — member of the admin group (wheel). With a user, the
+# account as configured; without one, this session's groups, which are what
+# sudo goes by: a change to wheel takes effect at the next login for both.
 omu_is_admin() {
-  local user=${1:-$(id -un)}
-  id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx "$OMU_ADMIN_GROUP"
+  if (( $# )); then
+    id -nG "$1" 2>/dev/null
+  else
+    id -nG
+  fi | tr ' ' '\n' | grep -qx "$OMU_ADMIN_GROUP"
 }
 
 # Human accounts SDDM would list: uid 1000..59999 with a login shell.
 omu_human_users() {
   getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ { print $1 }'
+}
+
+# The human accounts that are administrators, one per line. A wheel member
+# with no login doesn't count as someone left to administer the machine.
+omu_admins() {
+  local user
+  while read -r user; do
+    if omu_is_admin "$user"; then
+      echo "$user"
+    fi
+  done < <(omu_human_users)
+}
+
+# omu_has_programs <user> — anything running as them, in a session or not
+# (cron, su, a lingering user manager). userdel refuses while there is.
+omu_has_programs() {
+  pgrep -u "$1" >/dev/null
+}
+
+_omu_programs_end() {
+  local _
+  for _ in {1..10}; do
+    omu_has_programs "$1" || return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+# omu_sign_out <user> — end their sessions, then whatever outlives them.
+# Fails when something is still running.
+omu_sign_out() {
+  sudo loginctl terminate-user "$1" 2>/dev/null || true
+  if ! _omu_programs_end "$1"; then
+    sudo pkill -KILL -u "$1" || true
+    _omu_programs_end "$1"
+  fi
 }
 
 # omu_atomic_write <dest> <mode> — stdin to a sibling temp file, then rename,
@@ -112,4 +153,13 @@ omu_free_uid() {
 # omu_group_members <group> — its listed members, one per line.
 omu_group_members() {
   getent group "$1" | cut -d: -f4 | tr ',' '\n' | grep . || true
+}
+
+# omu_in_group <user> <group> — a listed member, or through the primary group.
+omu_in_group() {
+  local group gid
+  omu_group_members "$2" | grep -x -- "$1" >/dev/null && return 0
+  group=$(getent group "$2") || return 1
+  gid=$(getent passwd "$1" | cut -d: -f4)
+  [[ -n $gid && $gid == "$(cut -d: -f3 <<<"$group")" ]]
 }
