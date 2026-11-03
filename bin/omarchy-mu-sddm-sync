@@ -17,12 +17,12 @@
 # the greeter asks for twice instead of the usual password:
 #
 #   passwordChangeUsers  accounts with an empty password that has to be
-#                        changed (`passwd -d <user>; chage -d 0 <user>`),
+#                        changed (omarchy-mu-accounts first-login),
 #                        space-separated: QSettings reads "a,b" as a list,
 #                        and SDDM drops lists from theme.conf.user
 #
-# SDDM answers every PAM prompt with what was typed in the greeter, so for
-# such an account the new password is whatever goes in the box: the greeter
+# SDDM answers translated PAM prompts with what was typed in the greeter, so
+# for such an account the new password is whatever goes in the box: the greeter
 # needs to know beforehand to have it confirmed.
 #
 # Run by omarchy-mu-sddm-sync.path whenever the stock theme or /etc/shadow

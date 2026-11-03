@@ -1,11 +1,12 @@
 // Pure helpers for the first-login password. Loaded by Main.qml and, in the
 // tests, by node (module.exports at the bottom), so no QML here.
 //
-// SDDM answers every PAM prompt with what was typed in the greeter, so for an
-// account with an empty, expired password (`passwd -d`, `chage -d 0`) the
-// typed text becomes "New password" and "Retype new password" at once. The
-// greeter asks for it twice instead, for the accounts omarchy-mu-sddm-sync
-// lists in theme.conf.user (passwordChangeUsers).
+// SDDM answers translated PAM prompts with what was typed in the greeter, so for
+// an account with an empty, expired password (`passwd -d -e`) the typed text
+// becomes "Nova senha" and "Redigite a nova senha" at once. The greeter asks for
+// it twice instead, for the accounts omarchy-mu-sddm-sync lists in
+// theme.conf.user (passwordChangeUsers). English prompts can't work: see
+// greeter_takes_new_password in omarchy-mu-accounts.
 
 // passwordChangeUsers as SDDM hands it over: a space-separated string (a
 // list, from "a,b", only when the theme.conf default has one; SDDM drops

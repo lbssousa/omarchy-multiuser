@@ -32,17 +32,34 @@ points the Omarchy menu at them.
 - ↑/↓ change the user from either field, Tab moves between username and
   password, Enter logs in, Esc clears the password, a click selects.
 - an account that chooses its password at this login — an empty, expired
-  password, from `passwd -d <user>; chage -d 0 <user>` — gets **Nova senha**
-  and **Repita a senha** boxes instead, and logs in once both match.
+  password, what `omarchy-mu-user-add` leaves by default and
+  `omarchy-mu-accounts first-login <user>` gives a locked account — gets
+  **Nova senha** and **Repita a senha** boxes instead, and logs in once both
+  match.
 
-SDDM has no way to show PAM's "new password" prompts: it answers every one
-with what was typed in the greeter. For such an account that text becomes
+SDDM has no way to show PAM's "new password" prompts: it answers translated
+ones with what was typed in the greeter. For such an account that text becomes
 the new password at once, so the greeter has it typed twice first.
 `omarchy-mu-sddm-sync` lists these accounts in `theme.conf.user`
 (`passwordChangeUsers`), rerun whenever `/etc/shadow` changes; an account
 PAM reports as expired after that is added on the spot. An expired password
 that isn't empty can't be changed from the greeter (PAM would get the old
 password as the new one): log in on a text console for that.
+
+Limits of choosing the password at the login screen:
+
+- **Language.** It needs PAM's prompts translated, as `/etc/locale.conf` has
+  them: SDDM 0.21 recognizes the English "New password", answers it with the
+  user name and the repeat with the typed text, and PAM refuses the change.
+  `first-login` checks this and refuses; `omarchy-mu-user-add` then asks for
+  the password as before.
+- **First come.** Until the password is chosen, anyone at the login screen or
+  a text console can choose it, so an administrator's account gives them root.
+  `su` asks for a password (no `nullok`) and sshd refuses empty ones by default.
+  `omarchy-mu-user-add --set-password` asks for it up front instead.
+- **Keep the stack's `nullok`.** The empty password only gets past
+  `system-auth` with it. Without it the account can't log in until an
+  administrator runs `passwd <user>`.
 
 It keeps following **Appearance › Unlock**: the images come from the stock theme,
 which `omarchy-plymouth-set` recolors, and `omarchy-mu-sddm-sync` (run by

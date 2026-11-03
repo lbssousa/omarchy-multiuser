@@ -66,6 +66,7 @@ while (( $# > 1 )); do
   esac
 done
 printf '%s:x:%s:%s::/home/%s:/bin/bash\n' "$1" "$uid" "$uid" "$1" >>"$T/etc/passwd"
+printf '%s:!:20000:0:99999:7:::\n' "$1" >>"$T/etc/shadow"
 for g in ${groups//,/ }; do "$T/stubs/gpasswd" -a "$1" "$g"; done
 STUB
   cat >"$T/stubs/userdel" <<'STUB'
@@ -137,9 +138,24 @@ case $answer in
   *) exit 1 ;;
 esac
 STUB
+  cat >"$T/stubs/passwd" <<'STUB'
+#!/bin/bash
+echo "passwd $*" >>"$T/calls"
+[[ ! -e $T/passwd-fails ]] || exit 1
+[[ $1 == -d && $2 == -e ]] || exit 0
+sed -i -E "s/^($3):[^:]*:[^:]*:/\1::0:/" "$T/etc/shadow"
+STUB
+  # PAM's catalog, by the language the caller asks for.
+  cat >"$T/stubs/gettext" <<'STUB'
+#!/bin/bash
+case ${LC_ALL:-} in
+  pt*) printf 'Nova senha: ' ;;
+  *) printf '%s' "${*: -1}" ;;
+esac
+STUB
   # Nothing to do for the commands that have their own tests, or need hardware.
   local cmd
-  for cmd in passwd runuser fprintd-delete omarchy-mu-fido2-authfile omarchy-mu-luks-enroll omarchy-mu-apply-lock; do
+  for cmd in runuser fprintd-delete omarchy-mu-fido2-authfile omarchy-mu-luks-enroll omarchy-mu-apply-lock; do
     # shellcheck disable=SC2016  # $* and $T belong to the stub
     printf '#!/bin/bash\necho "%s $*" >>"$T/calls"\n' "$cmd" >"$T/stubs/$cmd"
   done

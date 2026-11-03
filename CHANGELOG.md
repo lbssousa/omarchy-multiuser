@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- New accounts choose their password at the login screen: `omarchy-mu-user-add`
+  leaves them locked until everything else is done, then runs the new
+  `omarchy-mu-accounts first-login <user>`. `--set-password` asks for it up
+  front, as before, which is also the fallback when the greeter can't do it.
+- `first-login` only opens a locked account, sets the empty password and its
+  expiry in one write (`passwd -d -e`) and checks the result, and refuses
+  machines whose PAM prompts are in English, which SDDM answers wrongly.
+- Greeter: Enter in the **Other user…** field moves on to the password box
+  again; it had stopped when the boxes became their own component.
+- Depends on `gettext`.
+
 ## 0.7.0 (2026-11-02)
 
 More from Omarchy PR #16100, and what reading it showed was missing here.
