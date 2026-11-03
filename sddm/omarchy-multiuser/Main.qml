@@ -10,8 +10,10 @@ import "Power.js" as Power
 // Omarchy's greeter (upstream/sddm/omarchy/Main.qml) with a user list: every
 // account SDDM lists, by full name, plus an optional "Other user…" row that
 // reveals a username field. The password row is the stock one, asked twice
-// for an account that chooses its password at this login (Password.js). The
-// power actions SDDM offers sit at the bottom, by click or F key (Power.js).
+// for an account that chooses its password at this login (Password.js). What
+// that account also needs hangs below the password row, so the logo and the
+// boxes stay put between users. The power actions SDDM offers sit at the
+// bottom, by click or F key (Power.js).
 Rectangle {
   id: root
   width: 640
@@ -314,7 +316,12 @@ Rectangle {
   }
 
   Column {
-    anchors.centerIn: parent
+    // Centered, or higher when what hangs below the password row wouldn't
+    // clear the power actions. Counted for every user, so it never moves.
+    readonly property real centeredY: (root.height - height) / 2
+    readonly property real clearY: root.height - height - belowPassword.reservedHeight - 64
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: Math.round(Math.max(0, Math.min(centeredY, clearY)))
     spacing: 40
 
     ThemeImage {
@@ -451,17 +458,6 @@ Rectangle {
         }
       }
 
-      Text {
-        width: password.width
-        anchors.right: passwordRow.right
-        text: Strings.t(root.localeName, "choosePassword")
-        visible: root.changeMode
-        color: root.textColor
-        wrapMode: Text.WordWrap
-        font.family: root.fontFamily
-        font.pixelSize: 18
-      }
-
       Row {
         id: passwordRow
         anchors.horizontalCenter: parent.horizontalCenter
@@ -499,42 +495,62 @@ Rectangle {
         }
       }
 
-      // The new password again, only for an account choosing it now.
+      // Hangs from this row, so none of it moves what is above. One pixel tall:
+      // a Column skips an item with no height, and what is inside it.
       Item {
-        id: confirmRow
-        visible: root.changeMode
         width: passwordRow.width
-        height: visible ? confirm.height : 0
+        height: 1
 
-        SecretField {
-          id: confirm
+        Column {
+          id: belowPassword
+          // The box and the notice, plus a line for a message. Not its height,
+          // which changes with the user.
+          readonly property real reservedHeight: confirm.height + notice.height + 24 + 2 * spacing
+          width: password.width
           anchors.right: parent.right
-          placeholder: Strings.t(root.localeName, "confirmPassword")
-          input.enabled: root.changeMode
+          spacing: 15
 
-          onKeyPressed: function (event) {
-            if (root.handleCommonKey(event))
-              return
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-              root.login()
-              event.accepted = true
-            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-              password.input.forceActiveFocus()
-              event.accepted = true
+          // The new password again, only for an account choosing it now.
+          SecretField {
+            id: confirm
+            visible: root.changeMode
+            placeholder: Strings.t(root.localeName, "confirmPassword")
+            input.enabled: root.changeMode
+
+            onKeyPressed: function (event) {
+              if (root.handleCommonKey(event))
+                return
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.login()
+                event.accepted = true
+              } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                password.input.forceActiveFocus()
+                event.accepted = true
+              }
             }
           }
-        }
-      }
 
-      Text {
-        width: password.width
-        anchors.right: passwordRow.right
-        text: root.message
-        visible: text.length > 0
-        color: root.textColor
-        wrapMode: Text.WordWrap
-        font.family: root.fontFamily
-        font.pixelSize: 16
+          Text {
+            id: notice
+            width: parent.width
+            text: Strings.t(root.localeName, "choosePassword")
+            visible: root.changeMode
+            color: root.textColor
+            wrapMode: Text.WordWrap
+            font.family: root.fontFamily
+            font.pixelSize: 18
+          }
+
+          Text {
+            width: parent.width
+            text: root.message
+            visible: text.length > 0
+            color: root.textColor
+            wrapMode: Text.WordWrap
+            font.family: root.fontFamily
+            font.pixelSize: 16
+          }
+        }
       }
     }
   }
