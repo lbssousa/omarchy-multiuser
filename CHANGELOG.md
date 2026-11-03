@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 (2026-11-03)
+
+New accounts choose their own password, from the greeter.
 
 - New accounts choose their password at the login screen: `omarchy-mu-user-add`
   leaves them locked until everything else is done, then runs the new
