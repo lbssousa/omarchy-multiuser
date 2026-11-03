@@ -1,0 +1,11 @@
+{
+  "switchUser": "Trocar de usuário",
+  "suspend": "Suspender",
+  "reboot": "Reiniciar",
+  "powerOff": "Desligar",
+  "confirmReboot": "Reiniciar o computador?",
+  "confirmPowerOff": "Desligar o computador?",
+  "confirm": "Confirmar",
+  "cancel": "Cancelar",
+  "failed": "Não foi possível"
+}

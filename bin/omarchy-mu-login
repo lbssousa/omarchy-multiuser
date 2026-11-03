@@ -9,6 +9,8 @@
 #   - keeps the multi-user block in the Omarchy menu (omarchy-mu-menu-sync);
 #   - keeps the bar's update icon for administrators only
 #     (omarchy-mu-update-widget-sync);
+#   - keeps the lock screen with user switching and power actions
+#     (omarchy-mu-lock-plugin-sync);
 #   - invites the user to enroll a fingerprint when the machine has a reader
 #     and they have none. Upstream's first-run invitation only fires while
 #     /etc/pam.d/omarchy-lock-fingerprint is missing, i.e. never for anyone
@@ -18,6 +20,7 @@ set -uo pipefail
 
 omarchy-mu-menu-sync || echo "omarchy-mu-menu-sync failed" >&2
 omarchy-mu-update-widget-sync || echo "omarchy-mu-update-widget-sync failed" >&2
+omarchy-mu-lock-plugin-sync || echo "omarchy-mu-lock-plugin-sync failed" >&2
 
 if command -v fprintd-list >/dev/null && omarchy-hw-fingerprint 2>/dev/null; then
   if fprintd-list "$USER" 2>&1 | grep -qi 'has no fingers enrolled' &&

@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# omarchy:summary=What the lock screen can do without unlocking, and doing it
+# omarchy:hidden=true
+#
+# Run by the lock screen (shell/lock), as the locked user. Takes fixed actions
+# only: nothing typed at the lock screen reaches this command.
+#
+#   capabilities     JSON: which of the actions below this machine offers now
+#   session-active   exits 1 when this session is in the background
+#   switchUser       a new login screen; this session stays locked behind it
+#   suspend | reboot | powerOff
+
+set -uo pipefail
+
+seat=${XDG_SEAT_PATH:-/org/freedesktop/DisplayManager/Seat0}
+
+# "yes" only: "challenge" would ask polkit for a password, in a prompt the lock
+# screen covers.
+logind_can() {
+  [[ $(busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager "$1" 2>/dev/null | jq -r '.data[0]' 2>/dev/null) == yes ]]
+}
+
+can_switch() {
+  [[ $(busctl get-property org.freedesktop.DisplayManager "$seat" \
+    org.freedesktop.DisplayManager.Seat CanSwitch 2>/dev/null) == "b true" ]]
+}
+
+# The same conditions as the suspend entry in Omarchy's system menu.
+can_suspend() {
+  ! omarchy-toggle-enabled suspend-off && ! omarchy-sleep-disabled && logind_can CanSuspend
+}
+
+json_bool() {
+  if "$@"; then echo true; else echo false; fi
+}
+
+case ${1:-} in
+capabilities)
+  printf '{"switchUser":%s,"suspend":%s,"reboot":%s,"powerOff":%s}\n' \
+    "$(json_bool can_switch)" "$(json_bool can_suspend)" \
+    "$(json_bool logind_can CanReboot)" "$(json_bool logind_can CanPowerOff)"
+  ;;
+session-active)
+  # Not knowing counts as active: the lock then blanks, as it always did.
+  [[ -z ${XDG_SESSION_ID:-} ||
+    $(loginctl show-session "$XDG_SESSION_ID" -p Active --value 2>/dev/null) != no ]]
+  ;;
+switchUser)
+  busctl call org.freedesktop.DisplayManager "$seat" \
+    org.freedesktop.DisplayManager.Seat SwitchToGreeter
+  ;;
+suspend)
+  systemctl suspend
+  ;;
+reboot)
+  omarchy-system reboot
+  ;;
+powerOff)
+  omarchy-system shutdown
+  ;;
+*)
+  echo "Usage: omarchy-mu-lock-action <capabilities|session-active|switchUser|suspend|reboot|powerOff>" >&2
+  exit 2
+  ;;
+esac

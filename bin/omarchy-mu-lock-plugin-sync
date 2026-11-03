@@ -1,0 +1,90 @@
+#!/bin/bash
+
+# omarchy:summary=Keep the multi-user lock screen in this user's shell
+# omarchy:hidden=true
+#
+# The lock screen with user switching and power actions is a clone of
+# omarchy.lock, which a shell only runs from its user's plugin directory.
+#
+#   (no argument)  run by omarchy-mu-login at every login: links the packaged
+#                  plugin and enables it once, which disables omarchy.lock. A
+#                  user who turns it off keeps it off: the record says this ran.
+#                  Someone with their own replacement for omarchy.lock is left
+#                  alone, and so is a session that is locked right now, whose
+#                  lock must not lose its client.
+#   remove         undoes that. The shell doesn't bring omarchy.lock back when a
+#                  clone's files vanish, so the package removes this first, or
+#                  the machine would be left with no lock screen at all.
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+id=lbssousa.lock
+source_id=omarchy.lock
+plugin=${OMU_LOCK_PLUGIN:-$OMU_SHARE/lock-plugin}
+config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+config=$config_home/omarchy/shell.json
+link=$config_home/omarchy/plugins/$id
+state=${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-multiuser/lock-plugin
+
+source_disabled() {
+  [[ -f $config ]] && jq -e --arg id "$source_id" \
+    '(.disabledPlugins // []) | index($id) != null' "$config" >/dev/null 2>&1
+}
+
+remove() {
+  if [[ -f $config ]]; then
+    local new
+    new=$(jq --arg id "$id" --arg source "$source_id" '
+      if (.cloneSourceRestores // []) | index($id) != null
+      then .disabledPlugins = ((.disabledPlugins // []) - [$source]) else . end
+      | if has("cloneSourceRestores") then .cloneSourceRestores -= [$id] else . end
+      | if .cloneSourceRestores == [] then del(.cloneSourceRestores) else . end
+      | if has("plugins") then .plugins |= map(select(.id != $id)) else . end' "$config")
+    printf '%s\n' "$new" >"$config.omu-new"
+    mv "$config.omu-new" "$config"
+  fi
+  [[ ! -L $link ]] || rm -f "$link"
+  rm -f "$state"
+}
+
+case ${1:-} in
+remove)
+  remove
+  exit 0
+  ;;
+"") ;;
+*)
+  echo "Usage: omarchy-mu-lock-plugin-sync [remove]" >&2
+  exit 2
+  ;;
+esac
+
+[[ -d $plugin ]] || exit 0
+mkdir -p "$(dirname "$link")"
+[[ -e $link || -L $link ]] || ln -s "$plugin" "$link"
+
+[[ ! -f $state ]] || exit 0
+if source_disabled; then
+  mkdir -p "$(dirname "$state")"
+  : >"$state"
+  exit 0
+fi
+
+# Enabling goes through the running shell, which at login may not be up yet.
+omarchy-notification-wait 30 || omu_die "omarchy-shell isn't answering; the lock screen is left as it is."
+[[ $(omarchy-shell lock isLocked 2>/dev/null) == false ]] || exit 0
+
+# The shell finds a new plugin directory on a rescan that finishes a moment later.
+omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+for _ in 1 2 3 4 5; do
+  if omarchy-plugin-enable "$id" >/dev/null 2>&1; then
+    mkdir -p "$(dirname "$state")"
+    : >"$state"
+    exit 0
+  fi
+  sleep 1
+done
+omu_die "couldn't enable $id; the lock screen is left as it is."

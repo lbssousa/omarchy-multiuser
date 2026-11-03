@@ -11,3 +11,6 @@ d45a69445f1fd086baaca913c804b60af069dc49eba0073d94cc7824f50d0a14  usr/share/omar
 aa578ec8a6269079e2141842073821fa24940fa4495a13815fa0754652e6027f  usr/share/omarchy/default/sddm/omarchy/Main.qml
 dd9c3e5e718cd9cd81094addc4307d8fe37918725cc2361b2014bd5e97bc1087  usr/share/omarchy/default/omarchy/omarchy-menu.jsonc
 f055edec7ce572ca75e4b0c23bb880d1d08dac96f042c72d4f5bdd1679adbfc5  usr/share/omarchy/install/user/first-run/setup-fingerprint.hook
+aea038809de0e44c76d444fabf9c75ef6d2b2002a40ac4333e3e2867135a2bb1  usr/share/omarchy/shell/plugins/lock/Service.qml
+a3e42cf20d98eb6c6978cc6c16f62d87c8ad7184bb359cace20c31ba19dc4a16  usr/share/omarchy/shell/plugins/lock/LockView.qml
+6684762de3e3b88445a165344a9093e8faedb0647137199f16ffd1861db6f87c  usr/share/omarchy/shell/plugins/lock/FingerprintModel.js

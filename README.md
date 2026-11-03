@@ -19,6 +19,28 @@ points the Omarchy menu at them.
 | Update lock per user, update log at a fixed `/tmp` path | One machine-wide lock for administrators' updates and migrations, also from the migrations notice; a finished update's log moved aside |
 | — | `omarchy-mu-user-add`, `omarchy-mu-user-remove`, `omarchy-mu-user-admin`, `omarchy-mu-luks-enroll` |
 
+## The lock screen
+
+`shell/lock` is Omarchy's own lock screen (`upstream/shell/plugins/lock`, the
+`omarchy.lock` plugin) with, at the bottom, what doesn't need unlocking:
+
+- **Switch user** (F5): a new login screen, the session staying locked behind it;
+- **Suspend** (F1), **Reboot** (F3) and **Shut down** (F4), the greeter's keys.
+  Reboot and Shut down ask first: Enter or a click confirms; Esc, typing or
+  10 seconds cancels. A key or click that wakes a dark screen only wakes it.
+
+Each is there only when the machine can do it (`omarchy-mu-lock-action
+capabilities`); Suspend follows the same switches as the system menu.
+
+`omarchy-mu-login` enables it once per account, as `lbssousa.lock`, in place of
+`omarchy.lock`. To go back: `omarchy plugin disable lbssousa.lock`; it stays off.
+Removing the package restores `omarchy.lock` for every account first, since the
+shell wouldn't, and that would leave the machine with no lock screen.
+
+Coming back to a locked session through the login screen ends at its own lock
+screen, which asks for the password itself. Anyone at the keyboard can reboot or shut down from here, as they can from the greeter,
+which also closes the other users' sessions.
+
 ## The greeter
 
 `/usr/share/sddm/themes/omarchy-multiuser` is Omarchy's own theme
