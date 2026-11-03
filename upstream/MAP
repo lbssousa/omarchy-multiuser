@@ -12,3 +12,6 @@ bin/omarchy-plymouth-set	/usr/share/omarchy/bin/omarchy-plymouth-set	bin/omarchy
 sddm/omarchy/Main.qml	/usr/share/omarchy/default/sddm/omarchy/Main.qml	sddm/omarchy-multiuser/Main.qml
 default/omarchy/omarchy-menu.jsonc	/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc	share/menu-block.jsonc
 install/user/first-run/setup-fingerprint.hook	/usr/share/omarchy/install/user/first-run/setup-fingerprint.hook	bin/omarchy-mu-login
+shell/plugins/lock/Service.qml	/usr/share/omarchy/shell/plugins/lock/Service.qml	shell/lock/Service.qml
+shell/plugins/lock/LockView.qml	/usr/share/omarchy/shell/plugins/lock/LockView.qml	shell/lock/LockView.qml
+shell/plugins/lock/FingerprintModel.js	/usr/share/omarchy/shell/plugins/lock/FingerprintModel.js	shell/lock/FingerprintModel.js

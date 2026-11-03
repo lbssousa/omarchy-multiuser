@@ -31,6 +31,12 @@ lint:
         echo "shellcheck not installed; skipping"
     fi
     /usr/lib/qt6/bin/qmllint -I /usr/lib/qt6/qml --unqualified disable sddm/omarchy-multiuser/Main.qml
+    # shell/lock imports the running shell's qs.* modules, which aren't on the
+    # import path here, so qmllint's complaints about them don't count; a syntax
+    # error is the one thing it reports as "Failed to parse".
+    for f in shell/lock/*.qml; do
+        if /usr/lib/qt6/bin/qmllint "$f" 2>&1 | grep -F 'Failed to parse'; then exit 1; fi
+    done
 
 # Load the greeter offscreen for a few seconds and fail on QML errors.
 greeter-smoke:

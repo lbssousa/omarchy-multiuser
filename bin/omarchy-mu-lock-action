@@ -1,0 +1,91 @@
+#!/bin/bash
+
+# omarchy:summary=What the lock screen can do without unlocking, and doing it
+# omarchy:hidden=true
+#
+# Run by the lock screen (shell/lock), as the locked user. Takes fixed actions
+# only: nothing typed at the lock screen reaches this command.
+#
+#   capabilities     JSON: which of the actions below this machine offers now
+#   session-active   exits 1 when this session is in the background
+#   watch-unlock     prints logind's signals for this session until killed
+#   wait-active      exits 0 once this session is in the foreground and has had
+#                    a moment to settle, 1 if it isn't within 5 seconds
+#   switchUser       a new login screen; this session stays locked behind it
+#   suspend | reboot | powerOff
+
+set -uo pipefail
+
+seat=${XDG_SEAT_PATH:-/org/freedesktop/DisplayManager/Seat0}
+
+# "yes" only: "challenge" would ask polkit for a password, in a prompt the lock
+# screen covers.
+logind_can() {
+  [[ $(busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager "$1" 2>/dev/null | jq -r '.data[0]' 2>/dev/null) == yes ]]
+}
+
+can_switch() {
+  [[ $(busctl get-property org.freedesktop.DisplayManager "$seat" \
+    org.freedesktop.DisplayManager.Seat CanSwitch 2>/dev/null) == "b true" ]]
+}
+
+# The same conditions as the suspend entry in Omarchy's system menu.
+can_suspend() {
+  ! omarchy-toggle-enabled suspend-off && ! omarchy-sleep-disabled && logind_can CanSuspend
+}
+
+json_bool() {
+  if "$@"; then echo true; else echo false; fi
+}
+
+case ${1:-} in
+capabilities)
+  printf '{"switchUser":%s,"suspend":%s,"reboot":%s,"powerOff":%s}\n' \
+    "$(json_bool can_switch)" "$(json_bool can_suspend)" \
+    "$(json_bool logind_can CanReboot)" "$(json_bool logind_can CanPowerOff)"
+  ;;
+session-active)
+  # Not knowing counts as active: the lock then blanks, as it always did.
+  [[ -z ${XDG_SESSION_ID:-} ||
+    $(loginctl show-session "$XDG_SESSION_ID" -p Active --value 2>/dev/null) != no ]]
+  ;;
+watch-unlock)
+  [[ -n ${XDG_SESSION_ID:-} ]] || exit 1
+  path=$(busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager GetSession s "$XDG_SESSION_ID" | jq -r '.data[0]') || exit 1
+  [[ $path == /org/freedesktop/login1/session/* ]] || exit 1
+  # exec: the lock stops this by killing it, and a pipeline would leave gdbus.
+  exec stdbuf -oL gdbus monitor --system --dest org.freedesktop.login1 --object-path "$path"
+  ;;
+wait-active)
+  # Only a clear yes: this one decides whether a lock opens.
+  [[ -n ${XDG_SESSION_ID:-} ]] || exit 1
+  for _ in {1..50}; do
+    if [[ $(loginctl show-session "$XDG_SESSION_ID" -p Active --value 2>/dev/null) == yes ]]; then
+      # logind says so a moment before the compositor has the displays back.
+      sleep 0.3
+      exit 0
+    fi
+    sleep 0.1
+  done
+  exit 1
+  ;;
+switchUser)
+  busctl call org.freedesktop.DisplayManager "$seat" \
+    org.freedesktop.DisplayManager.Seat SwitchToGreeter
+  ;;
+suspend)
+  systemctl suspend
+  ;;
+reboot)
+  omarchy-system reboot
+  ;;
+powerOff)
+  omarchy-system shutdown
+  ;;
+*)
+  echo "Usage: omarchy-mu-lock-action <capabilities|session-active|watch-unlock|wait-active|switchUser|suspend|reboot|powerOff>" >&2
+  exit 2
+  ;;
+esac

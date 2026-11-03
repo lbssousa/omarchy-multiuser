@@ -40,6 +40,10 @@ package() {
   install -Dm644 -t "$pkgdir/$theme" sddm/omarchy-multiuser/{Main.qml,UserList.js,Strings.js,Password.js,Power.js,theme.conf,metadata.desktop}
   install -Dm644 -t "$pkgdir/$theme/fallback" sddm/omarchy-multiuser/fallback/*.png
 
+  local lock=usr/share/omarchy-multiuser/lock-plugin
+  install -Dm644 -t "$pkgdir/$lock" shell/lock/*.{json,qml,js}
+  install -Dm644 -t "$pkgdir/$lock/i18n" shell/lock/i18n/*.json
+
   install -Dm644 -t "$pkgdir/etc/sddm.conf.d" etc/sddm.conf.d/zz-omarchy-multiuser.conf
   install -Dm440 -t "$pkgdir/etc/sudoers.d" etc/sudoers.d/omarchy-multiuser
   install -Dm644 -t "$pkgdir/usr/share/polkit-1/rules.d" polkit/10-omarchy-multiuser.rules

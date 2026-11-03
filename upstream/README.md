@@ -1,6 +1,8 @@
 # The Omarchy files the forks are based on
 
-Unmodified copies from **Omarchy 4.5.0rc1** (`VERSION`; `pacman -Q omarchy`).
+Unmodified copies from **Omarchy 4.5.0rc1** (`VERSION`; `pacman -Q omarchy`),
+except `shell/plugins/lock/`, from **4.5.0rc3**, until the next
+`just refresh-upstream` brings them all to one version.
 `MAP` pairs each snapshot with the installed file it came from and the fork
 in this repository. Omarchy is MIT licensed, like this project.
 

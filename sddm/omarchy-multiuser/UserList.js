@@ -55,6 +55,13 @@ function step(index, delta, count) {
   return ((index + delta) % count + count) % count
 }
 
+// The wheel moves too, but stops at the ends.
+function clampedStep(index, delta, count) {
+  if (count <= 0)
+    return 0
+  return Math.max(0, Math.min(index + delta, count - 1))
+}
+
 // Username handed to sddm.login(): the selected row's, or what was typed.
 function loginUser(entry, typed) {
   if (!entry)
@@ -69,6 +76,7 @@ if (typeof module !== "undefined") {
     buildEntries: buildEntries,
     initialIndex: initialIndex,
     step: step,
+    clampedStep: clampedStep,
     loginUser: loginUser
   }
 }

@@ -25,7 +25,21 @@ post_upgrade() {
   fi
 }
 
+# Each user's shell runs the lock screen from this package; with it gone and
+# omarchy.lock still disabled, it would have none. Their own files, as them.
+_restore_lock_screens() {
+  local user home
+  while IFS=: read -r user _ uid _ _ home shell; do
+    (( uid >= 1000 && uid < 60000 )) || continue
+    [[ $shell != */nologin && $shell != */false && -d $home ]] || continue
+    runuser -u "$user" -- env -u XDG_CONFIG_HOME -u XDG_STATE_HOME HOME="$home" \
+      /usr/bin/omarchy-mu-lock-plugin-sync remove >/dev/null 2>&1 ||
+      echo ":: Couldn't restore $user's lock screen: run omarchy-mu-lock-plugin-sync remove as them before removing this package." >&2
+  done < <(getent passwd)
+}
+
 pre_remove() {
+  _restore_lock_screens
   systemctl disable --now omarchy-mu-update-log.path >/dev/null 2>&1 || true
   rm -f /usr/share/sddm/themes/omarchy-multiuser/theme.conf.user
   systemctl --global disable omarchy-mu-login.service >/dev/null 2>&1 || true

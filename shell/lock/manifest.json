@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "lbssousa.lock",
+  "name": "Lock Screen (multi-user)",
+  "version": "1.0.0",
+  "author": "Laércio de Sousa",
+  "description": "Omarchy's lock screen plus switching user, suspending, rebooting and shutting down without unlocking.",
+  "omarchy": {
+    "clonedFrom": "omarchy.lock"
+  },
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

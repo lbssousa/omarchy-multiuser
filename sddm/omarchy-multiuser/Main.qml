@@ -10,8 +10,10 @@ import "Power.js" as Power
 // Omarchy's greeter (upstream/sddm/omarchy/Main.qml) with a user list: every
 // account SDDM lists, by full name, plus an optional "Other user…" row that
 // reveals a username field. The password row is the stock one, asked twice
-// for an account that chooses its password at this login (Password.js). The
-// power actions SDDM offers sit at the bottom, by click or F key (Power.js).
+// for an account that chooses its password at this login (Password.js). What
+// that account also needs hangs below the password row, so the logo and the
+// boxes stay put between users. The power actions SDDM offers sit at the
+// bottom, by click or F key (Power.js).
 Rectangle {
   id: root
   width: 640
@@ -100,6 +102,13 @@ Rectangle {
 
   function moveSelection(delta) {
     select(UserList.step(selectedIndex, delta, entries.length))
+  }
+
+  // The wheel stops at the ends, where it must not clear the password either.
+  function scrollSelection(delta) {
+    var next = UserList.clampedStep(selectedIndex, delta, entries.length)
+    if (next !== selectedIndex)
+      select(next)
   }
 
   // The username field when "Other user…" is selected and still empty,
@@ -314,7 +323,12 @@ Rectangle {
   }
 
   Column {
-    anchors.centerIn: parent
+    // Centered, or higher when what hangs below the password row wouldn't
+    // clear the power actions. Counted for every user, so it never moves.
+    readonly property real centeredY: (root.height - height) / 2
+    readonly property real clearY: root.height - height - belowPassword.reservedHeight - 64
+    anchors.horizontalCenter: parent.horizontalCenter
+    y: Math.round(Math.max(0, Math.min(centeredY, clearY)))
     spacing: 40
 
     ThemeImage {
@@ -338,9 +352,18 @@ Rectangle {
         anchors.right: passwordRow.right
         clip: true
         interactive: count > root.maxVisibleUsers
+        boundsBehavior: Flickable.StopAtBounds
+        snapMode: ListView.SnapToItem
         model: root.entries
         currentIndex: root.selectedIndex
-        highlightMoveDuration: 0
+        // A row stays visible on each side of the selected one, when it fits.
+        readonly property int contextHeight: root.maxVisibleUsers >= 3 ? rowHeight : 0
+        highlightRangeMode: ListView.ApplyRange
+        preferredHighlightBegin: contextHeight
+        preferredHighlightEnd: height - contextHeight
+        // Slides once someone moves; the last user starts in place.
+        highlightMoveVelocity: -1
+        highlightMoveDuration: root.selectionTouched ? 150 : 0
         visible: count > 0
 
         delegate: Item {
@@ -375,7 +398,7 @@ Rectangle {
             anchors.leftMargin: 24
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.topMargin: 4
+            anchors.topMargin: 2
           }
 
           Text {
@@ -395,6 +418,24 @@ Rectangle {
           MouseArea {
             anchors.fill: parent
             onClicked: root.select(row.index)
+          }
+        }
+      }
+
+      // Over the list, so the wheel selects instead of scrolling past the
+      // selection. Clicks and drags go through to the rows below.
+      MouseArea {
+        property real pending: 0
+        parent: userList
+        anchors.fill: parent
+        z: 1
+        acceptedButtons: Qt.NoButton
+        onWheel: function (event) {
+          pending += event.angleDelta.y
+          var notches = pending > 0 ? Math.floor(pending / 120) : Math.ceil(pending / 120)
+          if (notches !== 0) {
+            pending -= notches * 120
+            root.scrollSelection(-notches)
           }
         }
       }
@@ -451,17 +492,6 @@ Rectangle {
         }
       }
 
-      Text {
-        width: password.width
-        anchors.right: passwordRow.right
-        text: Strings.t(root.localeName, "choosePassword")
-        visible: root.changeMode
-        color: root.textColor
-        wrapMode: Text.WordWrap
-        font.family: root.fontFamily
-        font.pixelSize: 18
-      }
-
       Row {
         id: passwordRow
         anchors.horizontalCenter: parent.horizontalCenter
@@ -499,42 +529,62 @@ Rectangle {
         }
       }
 
-      // The new password again, only for an account choosing it now.
+      // Hangs from this row, so none of it moves what is above. One pixel tall:
+      // a Column skips an item with no height, and what is inside it.
       Item {
-        id: confirmRow
-        visible: root.changeMode
         width: passwordRow.width
-        height: visible ? confirm.height : 0
+        height: 1
 
-        SecretField {
-          id: confirm
+        Column {
+          id: belowPassword
+          // The box and the notice, plus a line for a message. Not its height,
+          // which changes with the user.
+          readonly property real reservedHeight: confirm.height + notice.height + 24 + 2 * spacing
+          width: password.width
           anchors.right: parent.right
-          placeholder: Strings.t(root.localeName, "confirmPassword")
-          input.enabled: root.changeMode
+          spacing: 15
 
-          onKeyPressed: function (event) {
-            if (root.handleCommonKey(event))
-              return
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-              root.login()
-              event.accepted = true
-            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-              password.input.forceActiveFocus()
-              event.accepted = true
+          // The new password again, only for an account choosing it now.
+          SecretField {
+            id: confirm
+            visible: root.changeMode
+            placeholder: Strings.t(root.localeName, "confirmPassword")
+            input.enabled: root.changeMode
+
+            onKeyPressed: function (event) {
+              if (root.handleCommonKey(event))
+                return
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                root.login()
+                event.accepted = true
+              } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+                password.input.forceActiveFocus()
+                event.accepted = true
+              }
             }
           }
-        }
-      }
 
-      Text {
-        width: password.width
-        anchors.right: passwordRow.right
-        text: root.message
-        visible: text.length > 0
-        color: root.textColor
-        wrapMode: Text.WordWrap
-        font.family: root.fontFamily
-        font.pixelSize: 16
+          Text {
+            id: notice
+            width: parent.width
+            text: Strings.t(root.localeName, "choosePassword")
+            visible: root.changeMode
+            color: root.textColor
+            wrapMode: Text.WordWrap
+            font.family: root.fontFamily
+            font.pixelSize: 18
+          }
+
+          Text {
+            width: parent.width
+            text: root.message
+            visible: text.length > 0
+            color: root.textColor
+            wrapMode: Text.WordWrap
+            font.family: root.fontFamily
+            font.pixelSize: 16
+          }
+        }
       }
     }
   }

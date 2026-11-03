@@ -1,0 +1,11 @@
+{
+  "switchUser": "Switch user",
+  "suspend": "Suspend",
+  "reboot": "Reboot",
+  "powerOff": "Shut down",
+  "confirmReboot": "Reboot the computer?",
+  "confirmPowerOff": "Shut down the computer?",
+  "confirm": "Confirm",
+  "cancel": "Cancel",
+  "failed": "That didn't work"
+}
