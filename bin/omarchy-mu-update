@@ -10,8 +10,9 @@
 # administrators could update at once; this takes a machine-wide one first
 # (omarchy-mu-migrate's admin path takes the same). omarchy-update also logs
 # to a fixed /tmp/omarchy-update.log, which the first administrator to update
-# owns and nobody else can open (fs.protected_regular); it is moved aside to
-# /tmp/omarchy-update.log.<owner> for the next one.
+# owns and nobody else can open (fs.protected_regular). omarchy-mu-update-log
+# moves it aside to /tmp/omarchy-update.log.<owner> when each update ends, also
+# one started from the bar; this does the same for a log that is still there.
 
 set -uo pipefail
 

@@ -1,0 +1,6 @@
+[Unit]
+Description=Move a finished update's log aside for the next administrator (omarchy-multiuser)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-mu-update-log

@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch Omarchy's update log, which blocks the next administrator's update (omarchy-multiuser)
+
+[Path]
+PathChanged=/tmp/omarchy-update.log
+
+[Install]
+WantedBy=multi-user.target

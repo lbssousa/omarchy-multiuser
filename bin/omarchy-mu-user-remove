@@ -4,13 +4,15 @@
 # omarchy:requires-sudo=true
 #
 # Also removes what the multi-user setup keeps for that user outside their
-# home: their FIDO2 line, fingerprints and LUKS keyslot, and the sudo grants
-# that would outlive them (the installer's by name, omarchy-sudo-passwordless'
-# by UID, which a later account could be given). Refuses to remove the
-# account running it and the last administrator. When one account is left,
-# root gets its password back, as omarchy-provision-owner set it up.
+# home: their FIDO2 line, fingerprints, LUKS keyslot and migration watcher, and
+# the sudo grants that would outlive them (the installer's by name,
+# omarchy-sudo-passwordless' by UID, which a later account could be given).
+# Refuses system accounts, the account running it and the last administrator.
+# Every question comes before anything changes. When one account is left, root
+# gets its password back, as omarchy-provision-owner set it up.
 #
-# Usage: omarchy-mu-user-remove [<user>] [--keep-home]
+# Usage: omarchy-mu-user-remove [<user>] [--keep-home|--delete-home]
+# Without either option it asks what to do with the home directory.
 
 set -euo pipefail
 
@@ -20,10 +22,11 @@ source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 omu_is_admin || omu_die "Only an administrator can remove users."
 omu_hold_lock accounts || omu_die "Another account change is in progress."
 
-user="" keep_home=false
+user="" home_choice=""
 for arg in "$@"; do
   case $arg in
-    --keep-home) keep_home=true ;;
+    --keep-home) home_choice=keep ;;
+    --delete-home) home_choice=delete ;;
     -*) omu_die "Unknown option: $arg" ;;
     *) user=$arg ;;
   esac
@@ -36,15 +39,50 @@ if [[ -z $user ]]; then
 fi
 
 getent passwd "$user" >/dev/null || omu_die "No such user: $user"
+omu_human_users | grep -x -- "$user" >/dev/null || omu_die "$user is a system account."
 [[ $user != "$(id -un)" ]] || omu_die "You can't remove your own account."
 if omu_is_admin "$user"; then
-  admins=$(getent group "$OMU_ADMIN_GROUP" | cut -d: -f4 | tr ',' '\n' | grep -c . || true)
-  (( admins > 1 )) || omu_die "$user is the last administrator."
+  omu_admins | grep -vx -- "$user" >/dev/null || omu_die "$user is the last administrator."
 fi
-loginctl show-user "$user" >/dev/null 2>&1 && omu_die "$user is logged in; log them out first."
 
-$keep_home && what="(keeping the home directory)" || what="and DELETE their home directory"
+home=$(getent passwd "$user" | cut -d: -f6)
+if [[ -z $home_choice ]]; then
+  status=0
+  gum confirm --default=false "Delete $user's files in $home too?" || status=$?
+  case $status in
+    0) home_choice=delete ;;
+    1) home_choice=keep ;;
+    *) exit 1 ;;
+  esac
+fi
+
+# omarchy-drive-password needs this note to finish a disk password change that
+# stopped part way, and keeps it in the home of whoever started the change.
+note=$home/.local/state/omarchy/drive-password.state
+if [[ $home_choice == delete ]] && sudo test -e "$OMU_ROOT$note"; then
+  omu_die "$home holds the note of an unfinished disk password change ($note); finish it first, or use --keep-home."
+fi
+
+if [[ $home_choice == keep ]]; then
+  what="(keeping the home directory)"
+else
+  what="and DELETE their home directory"
+fi
 gum confirm --default=false "Remove $user $what?" || exit 1
+
+# userdel refuses while the account has programs running, so ask now.
+sign_out=false
+if omu_has_programs "$user"; then
+  gum confirm --default=false "$user has programs running. Log them out and end those programs?" || exit 1
+  sign_out=true
+fi
+
+# Otherwise lingering would start a user manager again, and would pass to a
+# later account given the name.
+sudo loginctl disable-linger "$user" 2>/dev/null || true
+if $sign_out; then
+  omu_sign_out "$user" || omu_die "$user still has programs running; nothing was removed. Try again in a moment."
+fi
 
 sudo omarchy-mu-fido2-authfile remove --user "$user" >/dev/null 2>&1 || true
 sudo fprintd-delete "$user" >/dev/null 2>&1 || true
@@ -52,11 +90,25 @@ sudo omarchy-mu-luks-enroll --locked --remove "$user" || true
 # Before userdel: the grants must not outlive the account, even if this stops.
 sudo omarchy-mu-accounts drop-grants "$user"
 
-if $keep_home; then
-  sudo userdel "$user"
-else
-  sudo userdel --remove "$user"
+userdel_args=()
+[[ $home_choice == delete ]] && userdel_args=(--remove)
+home_left=false
+if ! output=$(sudo userdel "${userdel_args[@]}" "$user" 2>&1); then
+  printf '%s\n' "$output" >&2
+  # userdel can remove the account and then fail on its home.
+  getent passwd "$user" >/dev/null && omu_die "Couldn't remove $user; run this again to finish."
+  home_left=true
+elif [[ -n $output ]]; then
+  # Omarchy has no local mail, so the warning that there's no spool is noise.
+  grep -v 'mail spool' <<<"$output" >&2 || true
 fi
+
+# The account is gone: what depends on that happens even if its home isn't.
 sudo omarchy-mu-apply-lock --quiet || true
+sudo omarchy-mu-accounts sync-migration-watchers ||
+  echo "Warning: run sudo omarchy-mu-accounts sync-migration-watchers to finish." >&2
 sudo omarchy-mu-accounts root-sync
+if $home_left; then
+  omu_die "Removed $user, but couldn't delete $home; delete it by hand."
+fi
 omu_info "Removed $user."

@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# omarchy:summary=Move a finished update's log out of the next administrator's way
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# omarchy-update logs to a fixed /tmp/omarchy-update.log, which only whoever
+# created it can open again (fs.protected_regular), so the next administrator's
+# update would fail. omarchy-mu-update-log.path runs this as root when the file
+# changes: while something has it open, an update is running and it is left
+# alone; once closed, it goes to /tmp/omarchy-update.log.<owner>. This covers
+# the updates omarchy-mu-update never sees: the bar's icon and the first-login
+# notice run omarchy-update directly.
+#
+# /tmp is anyone's to write in, so only a regular file moves, and a rename acts
+# on the directory entries alone: it never follows a planted link.
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+log=$OMU_ROOT/tmp/omarchy-update.log
+
+[[ -f $log && ! -L $log ]] || exit 0
+
+# Processes come and go during the walk, so find's status means nothing.
+open=$(find /proc/[0-9]*/fd -maxdepth 1 -lname "$log" -print -quit 2>/dev/null) || true
+[[ -z $open ]] || exit 0
+
+mv -fT -- "$log" "$log.$(stat -c %U -- "$log")"

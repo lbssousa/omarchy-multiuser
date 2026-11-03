@@ -14,7 +14,8 @@
 # omarchy-provision-owner) is locked before the account exists, so a stop
 # part way leaves more protection, not less. The new account gets the lowest
 # UID that owns nothing in /home, and an administrator gets the %wheel sudo
-# rule when an ISO install granted the owner sudo by name only.
+# rule when an ISO install granted the owner sudo by name only, and the watcher
+# that records the migrations it runs.
 #
 # Usage: omarchy-mu-user-add [<user> --full-name <name>] [--email <address>]
 #                            [--admin] [--shell <path>] [--groups g1,g2] [--luks]
@@ -53,6 +54,10 @@ fi
 
 [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || omu_die "Invalid user name: $user"
 getent passwd "$user" >/dev/null && omu_die "User $user already exists."
+getent group "$user" >/dev/null && omu_die "A group named $user already exists."
+# useradd would keep it, owned by the account it was kept for (the new one
+# never gets that UID), and the new account couldn't use its own home.
+[[ ! -e $OMU_HOME_DIR/$user ]] || omu_die "$OMU_HOME_DIR/$user already exists; move it aside first (sudo mv $OMU_HOME_DIR/$user $OMU_HOME_DIR/$user.old)."
 [[ -n ${full_name//[[:space:]]/} ]] || omu_die "A full name is required (the login screen lists it)."
 [[ $full_name != *[:,]* && $full_name != *$'\n'* ]] || omu_die "The full name can't contain ':' ',' or line breaks."
 [[ -x $shell ]] || omu_die "No such shell: $shell"
@@ -87,6 +92,13 @@ sudo runuser -u "$user" -- env \
   OMARCHY_LOG_TO_STDOUT=1 \
   omarchy-provision-user --force --first-install ||
   echo "Omarchy's per-user setup didn't finish; it runs again at $user's first login." >&2
+
+# After that setup, which marks every migration done without running any: the
+# watcher must set those markers aside.
+if $admin; then
+  sudo omarchy-mu-accounts sync-migration-watchers ||
+    echo "Warning: the migrations $user runs won't be recorded; run: sudo omarchy-mu-accounts sync-migration-watchers" >&2
+fi
 
 if $luks; then
   sudo omarchy-mu-luks-enroll --locked "$user"

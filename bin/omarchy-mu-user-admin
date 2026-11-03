@@ -9,8 +9,11 @@
 # outside wheel (omarchy-mu-accounts drop-grants, which also warns about
 # other rules naming it and the docker group), then leaves wheel, so a stop
 # part way never leaves a grant behind; the account stays in omarchy-users
-# for what non-admins may do. Programs keep the groups they started with, so
-# sudo goes on working in a session already open: it offers to end it.
+# for what non-admins may do. Then it fails if something else still leads to
+# root (omarchy-mu-accounts check-root) rather than say the rights are gone.
+# Programs keep the groups they started with, so sudo goes on working in a
+# session already open: it offers to end it. Either way, the migrations this
+# account runs are recorded as an administrator's only while it is one.
 # Refuses to take your own rights away and the last administrator's.
 #
 # Usage: omarchy-mu-user-admin [<user> [on|off]]
@@ -62,15 +65,22 @@ if [[ -z $state ]]; then
   fi
 fi
 
+sync_watchers() {
+  sudo omarchy-mu-accounts sync-migration-watchers ||
+    echo "Warning: couldn't update who records migrations; run: sudo omarchy-mu-accounts sync-migration-watchers" >&2
+}
+
 if [[ $state == on ]]; then
   # Also for a member already: wheel alone gives no sudo on an install that
   # granted it by name only.
   sudo omarchy-mu-accounts ensure-wheel-sudo
   if [[ $current == on ]]; then
+    sync_watchers
     echo "$user is already an administrator."
     exit 0
   fi
   sudo gpasswd -a "$user" "$OMU_ADMIN_GROUP" >/dev/null
+  sync_watchers
   omu_info "$user is now an administrator, from their next login."
   exit 0
 fi
@@ -80,7 +90,7 @@ if [[ $current == off ]]; then
   exit 0
 fi
 [[ $user != "$(id -un)" ]] || omu_die "You can't take away your own administrator rights; ask another administrator."
-omu_group_members "$OMU_ADMIN_GROUP" | grep -vqx -- "$user" ||
+omu_admins | grep -vx -- "$user" >/dev/null ||
   omu_die "$user is the last administrator; make someone else one first."
 # gpasswd can't take a user out of their primary group.
 admin_gid=$(getent group "$OMU_ADMIN_GROUP" | cut -d: -f3)
@@ -91,14 +101,17 @@ admin_gid=$(getent group "$OMU_ADMIN_GROUP" | cut -d: -f3)
 # and running this again finishes.
 sudo omarchy-mu-accounts drop-grants "$user"
 sudo gpasswd -d "$user" "$OMU_ADMIN_GROUP" >/dev/null
+sync_watchers
 sudo groupadd -f "$OMU_USERS_GROUP"
 omu_group_members "$OMU_USERS_GROUP" | grep -qx -- "$user" || sudo gpasswd -a "$user" "$OMU_USERS_GROUP" >/dev/null
+sudo omarchy-mu-accounts check-root "$user" ||
+  omu_die "$user is out of $OMU_ADMIN_GROUP, but can still reach root (see above)."
 omu_info "$user is no longer an administrator."
 
-if loginctl show-user "$user" >/dev/null 2>&1; then
-  echo "$user is logged in, and their open programs keep sudo until they log out."
+if omu_has_programs "$user"; then
+  echo "$user has programs running, and they keep sudo until $user logs out."
   if gum confirm --default=false "Log $user out now?"; then
-    sudo loginctl terminate-user "$user"
+    omu_sign_out "$user" || omu_die "Some of $user's programs are still running and keep sudo."
     echo "Logged $user out."
   fi
 fi
