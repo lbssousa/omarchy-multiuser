@@ -123,6 +123,61 @@ test_remove_without_config_is_fine() {
   assert_no_file "$config"
 }
 
+# The package's own function, with the system's account list and runuser stood
+# in for: the stand-in runs the command as given, on this checkout's script.
+removal() {
+  setup
+  ana=$T/homes/ana sys=$T/homes/sys
+  mkdir -p "$ana/.config/omarchy/plugins" "$sys/.config/omarchy"
+  ln -s "$OMU_LOCK_PLUGIN" "$ana/.config/omarchy/plugins/lbssousa.lock"
+  local enabled='{"plugins":[{"id":"lbssousa.lock"}],"disabledPlugins":["omarchy.lock"],"cloneSourceRestores":["lbssousa.lock"]}'
+  echo "$enabled" >"$ana/.config/omarchy/shell.json"
+  echo "$enabled" >"$sys/.config/omarchy/shell.json"
+  cat >"$T/stubs/getent" <<STUB
+#!/bin/bash
+echo "root:x:0:0::/root:/bin/bash"
+echo "sys:x:999:999::$sys:/bin/bash"
+echo "ana:x:1000:1000::$ana:/bin/bash"
+echo "gone:x:1001:1001::$T/homes/none:/bin/bash"
+echo "svc:x:1002:1002::$sys:/usr/bin/nologin"
+echo "nobody:x:65534:65534::$sys:/bin/bash"
+STUB
+  cat >"$T/stubs/runuser" <<STUB
+#!/bin/bash
+echo "runuser \$2" >>"$calls"
+[[ \$2 != \${FAILS_FOR:-} ]] || exit 1
+shift 3
+exec "\${@/#\/usr\/bin\//}"
+STUB
+  chmod +x "$T/stubs/getent" "$T/stubs/runuser"
+  # shellcheck source=../../packaging/omarchy-multiuser.install
+  source "$REPO/packaging/omarchy-multiuser.install"
+}
+
+test_removing_the_package_restores_every_accounts_lock() {
+  removal
+  _restore_lock_screens 2>"$T/err"
+  assert_eq "$(jq -c .disabledPlugins "$ana/.config/omarchy/shell.json")" '[]'
+  assert_eq "$(jq -c .plugins "$ana/.config/omarchy/shell.json")" '[]'
+  [[ ! -L $ana/.config/omarchy/plugins/lbssousa.lock ]] || fail "link left"
+  [[ ! -s $T/err ]] || fail "complained: $(cat "$T/err")"
+}
+
+test_removing_the_package_leaves_other_accounts_alone() {
+  removal
+  _restore_lock_screens 2>/dev/null
+  assert_eq "$(grep -c '^runuser' "$calls")" 1
+  assert_contains "$calls" "runuser ana"
+  assert_contains "$sys/.config/omarchy/shell.json" lbssousa.lock
+}
+
+test_removing_the_package_says_whose_lock_it_couldnt_restore() {
+  removal
+  FAILS_FOR=ana _restore_lock_screens 2>"$T/err"
+  assert_contains "$T/err" "Couldn't restore ana's lock screen"
+  assert_contains "$ana/.config/omarchy/shell.json" lbssousa.lock
+}
+
 test_capabilities_all() {
   setup
   assert_eq "$(omarchy-mu-lock-action capabilities)" '{"switchUser":true,"suspend":true,"reboot":true,"powerOff":true}'
