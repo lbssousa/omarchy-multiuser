@@ -32,9 +32,13 @@
 #                      root that account's password hash back (the installer's
 #                      setup), but only when it is the caller's and an
 #                      administrator's
+#   first-login <user> let <user>, whose password is locked, choose it at the
+#                      login screen: an empty password that has to be changed,
+#                      in one write. Refused, the account staying locked, when
+#                      it has a password or the greeter can't take a new one
 #
 # Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|check-root <user>|
-#                            sync-migration-watchers|lock-root|root-sync
+#                            sync-migration-watchers|lock-root|root-sync|first-login <user>
 
 set -euo pipefail
 
@@ -204,6 +208,47 @@ root_sync() {
   echo "Root has $user's password again, as with a single owner."
 }
 
+# What the greeter needs to set a password. The daemon answers a prompt it reads
+# as "new password" (an English one: SDDM 0.21 matches the words) as part of a
+# pair, with the user name as the new password and the typed text as the repeat,
+# so PAM refuses the change. A translated prompt goes one at a time and gets the
+# typed text. SDDM runs in the locale of /etc/locale.conf.
+greeter_takes_new_password() {
+  local prompt
+  if [[ ! -f $OMU_SDDM_THEMES/$OMU_THEME/Main.qml ]]; then
+    echo "The multi-user greeter isn't installed." >&2
+    return 1
+  fi
+  prompt=$(
+    unset LANG LANGUAGE
+    # shellcheck disable=SC1091  # the machine's, not this package's
+    [[ ! -r $OMU_ROOT/etc/locale.conf ]] || . "$OMU_ROOT/etc/locale.conf"
+    LANGUAGE=${LANGUAGE:-} LC_ALL=${LANG:-C} gettext -d Linux-PAM 'New password: '
+  ) || return 1
+  if [[ -z $prompt || ${prompt,,} == *new*password* ]]; then
+    echo "SDDM can't take a new password in this machine's language (PAM asks \"${prompt:-?}\")." >&2
+    return 1
+  fi
+}
+
+first_login() {
+  local user=$1 hash
+  omu_human_users | grep -qx -- "$user" || omu_die "$user isn't an account people log in to."
+  hash=$(getent shadow "$user" | cut -d: -f2)
+  # Only ever opens an account nobody can log in to yet.
+  [[ -z $hash || $hash == '!'* || $hash == '*'* ]] || omu_die "$user already has a password."
+  greeter_takes_new_password || omu_die "$user can't choose a password at the login screen."
+  # -e after -d, in the same run: passwd -d alone counts as a password change,
+  # which would leave an empty password that nothing asks to replace.
+  passwd -d -e "$user" >/dev/null || true
+  if [[ $(getent shadow "$user" | cut -d: -f2,3) != ":0" ]]; then
+    usermod -L "$user" || true
+    omu_die "Couldn't set $user up for the first login; the password stays locked."
+  fi
+  # The path unit does this too, but the next greeter shouldn't depend on it.
+  omarchy-mu-sddm-sync >/dev/null || echo "Warning: the greeter doesn't list $user yet: run omarchy-mu-sddm-sync." >&2
+}
+
 case ${1:-} in
   ensure-wheel-sudo) ensure_wheel_sudo ;;
   drop-grants)
@@ -217,5 +262,9 @@ case ${1:-} in
   sync-migration-watchers) sync_migration_watchers ;;
   lock-root) lock_root ;;
   root-sync) root_sync ;;
-  *) omu_die "Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|check-root <user>|sync-migration-watchers|lock-root|root-sync" ;;
+  first-login)
+    [[ -n ${2:-} ]] || omu_die "Usage: omarchy-mu-accounts first-login <user>"
+    first_login "$2"
+    ;;
+  *) omu_die "Usage: omarchy-mu-accounts ensure-wheel-sudo|drop-grants <user>|check-root <user>|sync-migration-watchers|lock-root|root-sync|first-login <user>" ;;
 esac

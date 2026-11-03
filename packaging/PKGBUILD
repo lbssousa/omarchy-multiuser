@@ -10,7 +10,7 @@ pkgdesc='Several users on one Omarchy machine: a greeter listing them, per-user 
 arch=(any)
 url='https://github.com/lbssousa/omarchy-multiuser'
 license=(MIT)
-depends=(omarchy omarchy-settings sddm qt6-declarative imagemagick sudo jq gum)
+depends=(omarchy omarchy-settings sddm qt6-declarative imagemagick sudo jq gum gettext)
 optdepends=('pam-u2f: FIDO2 keys for sudo and polkit'
             'fprintd: fingerprints for sudo, polkit and the lock screen'
             'cryptsetup: per-user disk unlock passwords')
