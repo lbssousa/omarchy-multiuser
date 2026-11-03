@@ -392,7 +392,7 @@ Rectangle {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                 || event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
               if (otherUser.text.trim().length > 0)
-                password.forceActiveFocus()
+                password.input.forceActiveFocus()
               event.accepted = true
             }
           }
