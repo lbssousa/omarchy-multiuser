@@ -5,11 +5,13 @@ import SddmComponents 2.0
 import "UserList.js" as UserList
 import "Strings.js" as Strings
 import "Password.js" as Password
+import "Power.js" as Power
 
 // Omarchy's greeter (upstream/sddm/omarchy/Main.qml) with a user list: every
 // account SDDM lists, by full name, plus an optional "Other user…" row that
 // reveals a username field. The password row is the stock one, asked twice
-// for an account that chooses its password at this login (Password.js).
+// for an account that chooses its password at this login (Password.js). The
+// power actions SDDM offers sit at the bottom, by click or F key (Power.js).
 Rectangle {
   id: root
   width: 640
@@ -50,6 +52,16 @@ Rectangle {
   property string lastPamMessage: ""
   // Shown under the boxes: what is wrong with the new password.
   property string message: ""
+  readonly property var powerActions: Power.available(powerCaps)
+  // All false until the daemon tells SDDM what the machine can do.
+  readonly property var powerCaps: ({
+    suspend: sddm.canSuspend,
+    hibernate: sddm.canHibernate,
+    reboot: sddm.canReboot,
+    powerOff: sddm.canPowerOff
+  })
+  // The action waiting for a confirmation, or null.
+  property var pendingPower: null
   property int sessionIndex: {
     for (var i = 0; i < sessionModel.rowCount(); i++) {
       var name = (sessionModel.data(sessionModel.index(i, 0), Qt.DisplayRole) || "").toString()
@@ -82,6 +94,7 @@ Rectangle {
     confirm.input.text = ""
     loginFailed = false
     message = ""
+    pendingPower = null
     focusInput()
   }
 
@@ -123,8 +136,42 @@ Rectangle {
     sddm.login(user, password.input.text, root.sessionIndex)
   }
 
-  // Shared by both text fields: list navigation and Escape.
+  function requestPower(action) {
+    if (action.confirm) {
+      pendingPower = action
+      powerTimeout.restart()
+    } else {
+      runPower(action)
+    }
+  }
+
+  // Nothing typed stays in the boxes across a suspend.
+  function runPower(action) {
+    pendingPower = null
+    password.input.text = ""
+    confirm.input.text = ""
+    sddm[action.id]()
+  }
+
+  // Shared by the text fields: list navigation, Escape and the power keys.
   function handleCommonKey(event) {
+    if (pendingPower !== null) {
+      if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+        // Enter still held from before isn't an answer to the question.
+        if (!event.isAutoRepeat)
+          runPower(pendingPower)
+        event.accepted = true
+        return true
+      }
+      if (event.key === Qt.Key_Escape) {
+        pendingPower = null
+        event.accepted = true
+        return true
+      }
+      // Anything else is someone logging in: it goes on as usual.
+      if (event.key < Qt.Key_F1 || event.key > Qt.Key_F4)
+        pendingPower = null
+    }
     if (event.key === Qt.Key_Up) {
       moveSelection(-1)
     } else if (event.key === Qt.Key_Down) {
@@ -132,6 +179,11 @@ Rectangle {
     } else if (event.key === Qt.Key_Escape) {
       password.input.text = ""
       confirm.input.text = ""
+    } else if (event.key >= Qt.Key_F1 && event.key <= Qt.Key_F4) {
+      // Held down, the key would run it again as the machine wakes up.
+      var action = Power.forFKey(powerCaps, event.key - Qt.Key_F1 + 1)
+      if (action !== null && !event.isAutoRepeat)
+        requestPower(action)
     } else {
       return false
     }
@@ -484,6 +536,83 @@ Rectangle {
         font.family: root.fontFamily
         font.pixelSize: 16
       }
+    }
+  }
+
+  // Clicks here leave the keyboard focus in the text field.
+  component PowerLink: Item {
+    id: link
+    property string text
+    signal clicked()
+    width: linkLabel.implicitWidth
+    height: linkLabel.implicitHeight
+
+    Text {
+      id: linkLabel
+      text: link.text
+      color: root.textColor
+      opacity: linkMouse.containsMouse ? 1.0 : 0.55
+      font.family: root.fontFamily
+      font.pixelSize: 16
+    }
+
+    MouseArea {
+      id: linkMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: link.clicked()
+    }
+  }
+
+  // A question nobody answered doesn't wait for the next Enter.
+  Timer {
+    id: powerTimeout
+    interval: 10000
+    onTriggered: root.pendingPower = null
+  }
+
+  Row {
+    visible: root.pendingPower === null
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: 24
+    anchors.horizontalCenter: parent.horizontalCenter
+    spacing: 32
+
+    Repeater {
+      model: root.powerActions
+
+      delegate: PowerLink {
+        required property var modelData
+        text: modelData.icon + " " + Strings.t(root.localeName, modelData.label) + " [F" + modelData.fkey + "]"
+        onClicked: root.requestPower(modelData)
+      }
+    }
+  }
+
+  Row {
+    visible: root.pendingPower !== null
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: 24
+    anchors.horizontalCenter: parent.horizontalCenter
+    spacing: 32
+
+    Text {
+      text: root.pendingPower !== null
+            ? root.pendingPower.icon + " " + Strings.t(root.localeName, root.pendingPower.confirm) : ""
+      color: root.textColor
+      font.family: root.fontFamily
+      font.pixelSize: 16
+    }
+
+    PowerLink {
+      text: Strings.t(root.localeName, "confirm") + " [Enter]"
+      onClicked: root.runPower(root.pendingPower)
+    }
+
+    PowerLink {
+      text: Strings.t(root.localeName, "cancel") + " [Esc]"
+      onClicked: root.pendingPower = null
     }
   }
 

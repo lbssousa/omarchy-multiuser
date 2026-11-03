@@ -35,7 +35,11 @@ points the Omarchy menu at them.
   password, what `omarchy-mu-user-add` leaves by default and
   `omarchy-mu-accounts first-login <user>` gives a locked account — gets
   **Nova senha** and **Repita a senha** boxes instead, and logs in once both
-  match.
+  match;
+- at the bottom, **Suspend** (F1), **Hibernate** (F2), **Reboot** (F3) and
+  **Shut down** (F4), by click or key, each only when SDDM says the machine can
+  do it. An action keeps its key when another is missing. Reboot and Shut down
+  ask first: Enter or a click confirms; Esc, typing or 10 seconds cancels.
 
 SDDM has no way to show PAM's "new password" prompts: it answers translated
 ones with what was typed in the greeter. For such an account that text becomes
