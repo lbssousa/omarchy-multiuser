@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0 (2026-11-03)
+
+The lock screen can switch user and turn the machine off without unlocking.
+
+- Lock screen: **Switch user** (F5), **Suspend** (F1), **Reboot** (F3) and
+  **Shut down** (F4), by click or key, each only when the machine can do it.
+  Rebooting and shutting down ask for a confirmation first. It is a fork of
+  `omarchy.lock`, which `omarchy-mu-login` enables once per account as
+  `lbssousa.lock`; `omarchy plugin disable lbssousa.lock` goes back, and removing
+  the package restores `omarchy.lock` for every account.
+- Coming back through the login screen after **Switch user** asks for the
+  password once. Any other lock still ignores logind's unlock.
+- A session locked in the background no longer dims the displays or holds the
+  fingerprint reader. A key or click that wakes a dark screen only wakes it.
+- Greeter: the logo and password box stay in place when an account that chooses
+  its password is selected, with the notice now under the boxes.
+- Greeter: the user list slides, keeps a row visible on each side of the
+  selection, and the mouse wheel changes the user.
+
 ## 0.8.1 (2026-11-03)
 
 The login screen can turn the machine off.
