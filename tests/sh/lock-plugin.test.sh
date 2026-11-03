@@ -1,5 +1,6 @@
 #!/bin/bash
 # shellcheck disable=SC2031  # $T is set by run_tests in the subshell each test runs in
+# shellcheck disable=SC2016  # the stubs' code runs in the stubs, not in this shell
 # shellcheck source=lib.sh
 source "$(dirname "$0")/lib.sh"
 
