@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Greeter: suspend, hibernate, reboot and shut down at the bottom of the screen,
+  by click or with F1 to F4, each only when SDDM says the machine can do it.
+
 ## 0.8.0 (2026-11-03)
 
 New accounts choose their own password, from the greeter.

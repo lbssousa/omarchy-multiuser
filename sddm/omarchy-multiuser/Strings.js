@@ -10,7 +10,11 @@ var catalogs = {
     confirmPassword: "Repeat the password",
     emptyPassword: "Type a password",
     mismatch: "The passwords don't match",
-    changeFailed: "The password wasn't changed"
+    changeFailed: "The password wasn't changed",
+    suspend: "Suspend",
+    hibernate: "Hibernate",
+    reboot: "Reboot",
+    powerOff: "Shut down"
   },
   pt: {
     otherUser: "Outro usuário…",
@@ -20,7 +24,11 @@ var catalogs = {
     confirmPassword: "Repita a senha",
     emptyPassword: "Digite uma senha",
     mismatch: "As senhas não coincidem",
-    changeFailed: "A senha não foi alterada"
+    changeFailed: "A senha não foi alterada",
+    suspend: "Suspender",
+    hibernate: "Hibernar",
+    reboot: "Reiniciar",
+    powerOff: "Desligar"
   }
 }
 

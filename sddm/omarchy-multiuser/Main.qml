@@ -5,11 +5,13 @@ import SddmComponents 2.0
 import "UserList.js" as UserList
 import "Strings.js" as Strings
 import "Password.js" as Password
+import "Power.js" as Power
 
 // Omarchy's greeter (upstream/sddm/omarchy/Main.qml) with a user list: every
 // account SDDM lists, by full name, plus an optional "Other user…" row that
 // reveals a username field. The password row is the stock one, asked twice
-// for an account that chooses its password at this login (Password.js).
+// for an account that chooses its password at this login (Password.js). The
+// power actions SDDM offers sit at the bottom, by click or F key (Power.js).
 Rectangle {
   id: root
   width: 640
@@ -50,6 +52,14 @@ Rectangle {
   property string lastPamMessage: ""
   // Shown under the boxes: what is wrong with the new password.
   property string message: ""
+  readonly property var powerActions: Power.available(powerCaps)
+  // All false until the daemon tells SDDM what the machine can do.
+  readonly property var powerCaps: ({
+    suspend: sddm.canSuspend,
+    hibernate: sddm.canHibernate,
+    reboot: sddm.canReboot,
+    powerOff: sddm.canPowerOff
+  })
   property int sessionIndex: {
     for (var i = 0; i < sessionModel.rowCount(); i++) {
       var name = (sessionModel.data(sessionModel.index(i, 0), Qt.DisplayRole) || "").toString()
@@ -123,7 +133,14 @@ Rectangle {
     sddm.login(user, password.input.text, root.sessionIndex)
   }
 
-  // Shared by both text fields: list navigation and Escape.
+  // Nothing typed stays in the boxes across a suspend.
+  function runPower(action) {
+    password.input.text = ""
+    confirm.input.text = ""
+    sddm[action.id]()
+  }
+
+  // Shared by the text fields: list navigation, Escape and the power keys.
   function handleCommonKey(event) {
     if (event.key === Qt.Key_Up) {
       moveSelection(-1)
@@ -132,6 +149,11 @@ Rectangle {
     } else if (event.key === Qt.Key_Escape) {
       password.input.text = ""
       confirm.input.text = ""
+    } else if (event.key >= Qt.Key_F1 && event.key <= Qt.Key_F4) {
+      // Held down, the key would run it again as the machine wakes up.
+      var action = Power.forFKey(powerCaps, event.key - Qt.Key_F1 + 1)
+      if (action !== null && !event.isAutoRepeat)
+        runPower(action)
     } else {
       return false
     }
@@ -483,6 +505,43 @@ Rectangle {
         wrapMode: Text.WordWrap
         font.family: root.fontFamily
         font.pixelSize: 16
+      }
+    }
+  }
+
+  // Clicks here leave the keyboard focus in the text field.
+  Row {
+    anchors.bottom: parent.bottom
+    anchors.bottomMargin: 24
+    anchors.horizontalCenter: parent.horizontalCenter
+    spacing: 32
+
+    Repeater {
+      model: root.powerActions
+
+      delegate: Item {
+        id: powerItem
+        required property var modelData
+        width: powerLabel.implicitWidth
+        height: powerLabel.implicitHeight
+
+        Text {
+          id: powerLabel
+          text: powerItem.modelData.icon + " " + Strings.t(root.localeName, powerItem.modelData.label)
+                + " [F" + powerItem.modelData.fkey + "]"
+          color: root.textColor
+          opacity: powerMouse.containsMouse ? 1.0 : 0.55
+          font.family: root.fontFamily
+          font.pixelSize: 16
+        }
+
+        MouseArea {
+          id: powerMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.runPower(powerItem.modelData)
+        }
       }
     }
   }
