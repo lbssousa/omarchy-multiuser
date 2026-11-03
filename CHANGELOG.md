@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 (2026-11-03)
+
+The login screen can turn the machine off.
 
 - Greeter: suspend, hibernate, reboot and shut down at the bottom of the screen,
   by click or with F1 to F4, each only when SDDM says the machine can do it.
