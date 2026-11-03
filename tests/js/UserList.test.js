@@ -52,6 +52,14 @@ test("initialIndex picks the last user, else the first row", () => {
   assert.equal(L.initialIndex([], "abutre"), 0)
 })
 
+test("clampedStep stops at the ends", () => {
+  assert.equal(L.clampedStep(0, -1, 4), 0)
+  assert.equal(L.clampedStep(3, 1, 4), 3)
+  assert.equal(L.clampedStep(1, 1, 4), 2)
+  assert.equal(L.clampedStep(1, 5, 4), 3)
+  assert.equal(L.clampedStep(0, 1, 0), 0)
+})
+
 test("step wraps around", () => {
   assert.equal(L.step(0, -1, 4), 3)
   assert.equal(L.step(3, 1, 4), 0)

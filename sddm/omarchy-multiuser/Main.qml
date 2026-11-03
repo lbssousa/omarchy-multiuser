@@ -104,6 +104,13 @@ Rectangle {
     select(UserList.step(selectedIndex, delta, entries.length))
   }
 
+  // The wheel stops at the ends, where it must not clear the password either.
+  function scrollSelection(delta) {
+    var next = UserList.clampedStep(selectedIndex, delta, entries.length)
+    if (next !== selectedIndex)
+      select(next)
+  }
+
   // The username field when "Other user…" is selected and still empty,
   // otherwise the password.
   function focusInput() {
@@ -345,9 +352,18 @@ Rectangle {
         anchors.right: passwordRow.right
         clip: true
         interactive: count > root.maxVisibleUsers
+        boundsBehavior: Flickable.StopAtBounds
+        snapMode: ListView.SnapToItem
         model: root.entries
         currentIndex: root.selectedIndex
-        highlightMoveDuration: 0
+        // A row stays visible on each side of the selected one, when it fits.
+        readonly property int contextHeight: root.maxVisibleUsers >= 3 ? rowHeight : 0
+        highlightRangeMode: ListView.ApplyRange
+        preferredHighlightBegin: contextHeight
+        preferredHighlightEnd: height - contextHeight
+        // Slides once someone moves; the last user starts in place.
+        highlightMoveVelocity: -1
+        highlightMoveDuration: root.selectionTouched ? 150 : 0
         visible: count > 0
 
         delegate: Item {
@@ -382,7 +398,7 @@ Rectangle {
             anchors.leftMargin: 24
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.topMargin: 4
+            anchors.topMargin: 2
           }
 
           Text {
@@ -402,6 +418,24 @@ Rectangle {
           MouseArea {
             anchors.fill: parent
             onClicked: root.select(row.index)
+          }
+        }
+      }
+
+      // Over the list, so the wheel selects instead of scrolling past the
+      // selection. Clicks and drags go through to the rows below.
+      MouseArea {
+        property real pending: 0
+        parent: userList
+        anchors.fill: parent
+        z: 1
+        acceptedButtons: Qt.NoButton
+        onWheel: function (event) {
+          pending += event.angleDelta.y
+          var notches = pending > 0 ? Math.floor(pending / 120) : Math.ceil(pending / 120)
+          if (notches !== 0) {
+            pending -= notches * 120
+            root.scrollSelection(-notches)
           }
         }
       }

@@ -29,8 +29,9 @@ points the Omarchy menu at them.
   small print underneath;
 - the last user preselected (`RememberLastUser`);
 - a last **Outro usuário… / Other user…** row that reveals a username field;
-- ↑/↓ change the user from either field, Tab moves between username and
-  password, Enter logs in, Esc clears the password, a click selects.
+- ↑/↓ (which wrap around) or the mouse wheel over the list change the user from
+  either field, Tab moves between username and password, Enter logs in, Esc
+  clears the password, a click selects.
 - an account that chooses its password at this login — an empty, expired
   password, what `omarchy-mu-user-add` leaves by default and
   `omarchy-mu-accounts first-login <user>` gives a locked account — gets
