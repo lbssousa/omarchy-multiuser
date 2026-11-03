@@ -8,6 +8,9 @@
 #
 #   capabilities     JSON: which of the actions below this machine offers now
 #   session-active   exits 1 when this session is in the background
+#   watch-unlock     prints logind's signals for this session until killed
+#   wait-active      exits 0 once this session is in the foreground and has had
+#                    a moment to settle, 1 if it isn't within 5 seconds
 #   switchUser       a new login screen; this session stays locked behind it
 #   suspend | reboot | powerOff
 
@@ -47,6 +50,27 @@ session-active)
   [[ -z ${XDG_SESSION_ID:-} ||
     $(loginctl show-session "$XDG_SESSION_ID" -p Active --value 2>/dev/null) != no ]]
   ;;
+watch-unlock)
+  [[ -n ${XDG_SESSION_ID:-} ]] || exit 1
+  path=$(busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 \
+    org.freedesktop.login1.Manager GetSession s "$XDG_SESSION_ID" | jq -r '.data[0]') || exit 1
+  [[ $path == /org/freedesktop/login1/session/* ]] || exit 1
+  # exec: the lock stops this by killing it, and a pipeline would leave gdbus.
+  exec stdbuf -oL gdbus monitor --system --dest org.freedesktop.login1 --object-path "$path"
+  ;;
+wait-active)
+  # Only a clear yes: this one decides whether a lock opens.
+  [[ -n ${XDG_SESSION_ID:-} ]] || exit 1
+  for _ in {1..50}; do
+    if [[ $(loginctl show-session "$XDG_SESSION_ID" -p Active --value 2>/dev/null) == yes ]]; then
+      # logind says so a moment before the compositor has the displays back.
+      sleep 0.3
+      exit 0
+    fi
+    sleep 0.1
+  done
+  exit 1
+  ;;
 switchUser)
   busctl call org.freedesktop.DisplayManager "$seat" \
     org.freedesktop.DisplayManager.Seat SwitchToGreeter
@@ -61,7 +85,7 @@ powerOff)
   omarchy-system shutdown
   ;;
 *)
-  echo "Usage: omarchy-mu-lock-action <capabilities|session-active|switchUser|suspend|reboot|powerOff>" >&2
+  echo "Usage: omarchy-mu-lock-action <capabilities|session-active|watch-unlock|wait-active|switchUser|suspend|reboot|powerOff>" >&2
   exit 2
   ;;
 esac

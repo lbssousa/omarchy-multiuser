@@ -150,6 +150,69 @@ test_actions_run_what_they_should() {
   assert_contains "$calls" "omarchy-system shutdown"
 }
 
+test_watch_unlock_needs_a_session() {
+  setup
+  if omarchy-mu-lock-action watch-unlock; then fail "watched nothing"; fi
+  [[ ! -s $calls ]] || fail "asked logind about no session"
+}
+
+test_watch_unlock_watches_this_session_only() {
+  setup
+  export XDG_SESSION_ID=7
+  cat >"$T/stubs/busctl" <<'STUB'
+#!/bin/bash
+[[ $* == *"GetSession s 7"* ]] && echo '{"type":"o","data":["/org/freedesktop/login1/session/_37"]}'
+STUB
+  printf '#!/bin/bash\nshift\nexec "$@"\n' >"$T/stubs/stdbuf"
+  printf '#!/bin/bash\necho "$*" >>"%s"\n' "$calls" >"$T/stubs/gdbus"
+  chmod +x "$T/stubs/busctl" "$T/stubs/stdbuf" "$T/stubs/gdbus"
+  omarchy-mu-lock-action watch-unlock
+  assert_contains "$calls" "--object-path /org/freedesktop/login1/session/_37"
+}
+
+test_watch_unlock_refuses_a_strange_answer() {
+  setup
+  export XDG_SESSION_ID=7
+  printf '#!/bin/bash\necho %s\n' "'{\"data\":[\"/org/evil\"]}'" >"$T/stubs/busctl"
+  chmod +x "$T/stubs/busctl"
+  if omarchy-mu-lock-action watch-unlock; then fail "watched /org/evil"; fi
+}
+
+test_wait_active_answers_once_the_session_is_back() {
+  setup
+  export XDG_SESSION_ID=7
+  ACTIVE=yes omarchy-mu-lock-action wait-active || fail "active session"
+  assert_eq "$(grep -c '^loginctl' "$calls")" 1
+  assert_contains "$calls" "sleep 0.3"
+}
+
+test_wait_active_waits_for_the_switch() {
+  setup
+  export XDG_SESSION_ID=7
+  # Active on the third look, as when SDDM switches back while this waits.
+  stub loginctl '(( $(grep -c ^loginctl '"$calls"') >= 3 )) && echo yes || echo no'
+  omarchy-mu-lock-action wait-active || fail "came back"
+  assert_eq "$(grep -c '^loginctl' "$calls")" 3
+}
+
+test_wait_active_gives_up_and_the_lock_stays() {
+  setup
+  export XDG_SESSION_ID=7
+  if ACTIVE=no omarchy-mu-lock-action wait-active; then fail "never came back"; fi
+  assert_eq "$(grep -c '^loginctl' "$calls")" 50
+}
+
+test_wait_active_takes_only_a_clear_yes() {
+  setup
+  export XDG_SESSION_ID=7
+  stub loginctl 'exit 1'
+  if omarchy-mu-lock-action wait-active; then fail "no answer isn't yes"; fi
+  unset XDG_SESSION_ID
+  : >"$calls"
+  if omarchy-mu-lock-action wait-active; then fail "no session"; fi
+  [[ ! -s $calls ]] || fail "asked about no session"
+}
+
 test_unknown_action_is_refused() {
   setup
   omarchy-mu-lock-action rm 2>/dev/null

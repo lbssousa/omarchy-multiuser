@@ -41,11 +41,18 @@ function forFKey(offered, n) {
   return null
 }
 
+// A line from `omarchy-mu-lock-action watch-unlock` meaning logind was told to
+// unlock the session it watches. Exactly that line: the rest is gdbus talking.
+function isUnlockSignal(line) {
+  return /^\/org\/freedesktop\/login1\/session\/[A-Za-z0-9_]+: org\.freedesktop\.login1\.Session\.Unlock \(\)$/.test(String(line))
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     actions: actions,
     parseCapabilities: parseCapabilities,
     available: available,
-    forFKey: forFKey
+    forFKey: forFKey,
+    isUnlockSignal: isUnlockSignal
   }
 }

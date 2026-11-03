@@ -65,6 +65,10 @@ Item {
   // The action waiting for a confirmation, or null. Here rather than in the
   // view: each screen has its own, and all of them have to show the question.
   property var pendingLockAction: null
+  // Left for the login screen: SDDM asks logind to unlock this session once the
+  // user has given it their password there. Only then does the lock listen, so
+  // logind's word never opens a lock nobody left through the login screen.
+  property bool awaitingGreeterUnlock: false
   // A key that wakes the displays is only waking them, so it can't run anything.
   property bool displayBlanked: false
   property bool strandedLock: false
@@ -230,6 +234,7 @@ Item {
       pauseFingerprint()
       if (fingerprintPam.active) fingerprintPam.abort()
       settleFingerprintAttempt()
+      awaitingGreeterUnlock = true
     }
     lockActionProc.command = ["omarchy-mu-lock-action", action.id]
     lockActionProc.running = true
@@ -237,6 +242,7 @@ Item {
 
   function resetAuthenticationState() {
     cancelLockAction()
+    awaitingGreeterUnlock = false
     enteredPassword = ""
     pendingPassword = ""
     failureMessage = ""
@@ -825,10 +831,43 @@ Item {
   Process {
     id: lockActionProc
     onExited: function(exitCode) {
-      if (exitCode === 0 || !root.lockRequested) return
+      if (exitCode === 0) return
+      if (command[1] === "switchUser") root.awaitingGreeterUnlock = false
+      if (!root.lockRequested) return
       root.logEvent("lock-action-failed: " + command[1] + " exit=" + exitCode)
       root.failureMessage = strings.t("failed")
       root.runWake()
+    }
+  }
+
+  Process {
+    id: greeterUnlockWatch
+    command: ["omarchy-mu-lock-action", "watch-unlock"]
+    running: root.awaitingGreeterUnlock
+    stdout: SplitParser {
+      onRead: function(line) {
+        if (!root.awaitingGreeterUnlock || !LockActions.isUnlockSignal(line)) return
+        greeterUnlockActive.running = true
+      }
+    }
+  }
+
+  // SDDM asks for the unlock a moment before it switches back here. A lock that
+  // ended before that would stay on the screen: the compositor can't draw without
+  // the displays, and nothing asks it to redraw once it has them. If the session
+  // doesn't come back, that password was for a moment that has passed: it stays
+  // locked, and the lock's own password opens it.
+  Process {
+    id: greeterUnlockActive
+    command: ["omarchy-mu-lock-action", "wait-active"]
+    onExited: function(exitCode) {
+      if (!root.awaitingGreeterUnlock) return
+      if (exitCode !== 0) {
+        root.logEvent("login-screen-unlock-expired")
+        return
+      }
+      root.logEvent("unlocked-from-login-screen")
+      root.finishUnlock()
     }
   }
 

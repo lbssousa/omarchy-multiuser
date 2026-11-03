@@ -41,6 +41,17 @@ test("only what ends the sessions asks first", () => {
   assert.equal(A.forFKey(offered, 4).confirm, "confirmPowerOff")
 })
 
+test("only logind's unlock signal counts", () => {
+  const unlock = "/org/freedesktop/login1/session/_32: org.freedesktop.login1.Session.Unlock ()"
+  assert.equal(A.isUnlockSignal(unlock), true)
+  assert.equal(A.isUnlockSignal(unlock + " "), false)
+  assert.equal(A.isUnlockSignal("x" + unlock), false)
+  assert.equal(A.isUnlockSignal("/org/freedesktop/login1/session/_32: org.freedesktop.login1.Session.Lock ()"), false)
+  assert.equal(A.isUnlockSignal("/org/evil: org.freedesktop.login1.Session.Unlock ()"), false)
+  assert.equal(A.isUnlockSignal("Monitoring signals on object /org/freedesktop/login1/session/_32 owned by org.freedesktop.login1"), false)
+  assert.equal(A.isUnlockSignal(""), false)
+})
+
 for (const lang of ["en", "pt"]) {
   test(`${lang} has every string the actions use`, () => {
     const file = path.join(__dirname, "../../shell/lock/i18n", `${lang}.json`)

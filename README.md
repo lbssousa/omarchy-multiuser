@@ -37,8 +37,12 @@ capabilities`); Suspend follows the same switches as the system menu.
 Removing the package restores `omarchy.lock` for every account first, since the
 shell wouldn't, and that would leave the machine with no lock screen.
 
-Coming back to a locked session through the login screen ends at its own lock
-screen, which asks for the password itself. Anyone at the keyboard can reboot or shut down from here, as they can from the greeter,
+Coming back to a session through the login screen doesn't ask for the password
+twice: SDDM asks logind to unlock it, and a lock left with Switch user listens for
+that until it ends. A lock left any other way doesn't. Telling logind to unlock
+someone else's session takes an administrator's password (polkit's
+`lock-sessions`), but the session's own programs can do it while it waits in the
+background. Anyone at the keyboard can reboot or shut down from here, as they can from the greeter,
 which also closes the other users' sessions.
 
 ## The greeter
