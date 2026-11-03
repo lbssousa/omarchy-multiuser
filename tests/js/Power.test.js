@@ -24,6 +24,13 @@ test("an action keeps its F key when another is missing", () => {
   assert.equal(P.forFKey(noHibernate, 4).id, "powerOff")
 })
 
+test("only what ends the sessions asks first", () => {
+  assert.equal(P.forFKey(all, 1).confirm, undefined)
+  assert.equal(P.forFKey(all, 2).confirm, undefined)
+  assert.equal(P.forFKey(all, 3).confirm, "confirmReboot")
+  assert.equal(P.forFKey(all, 4).confirm, "confirmPowerOff")
+})
+
 test("other keys and a machine that can't do it run nothing", () => {
   assert.equal(P.forFKey(all, 0), null)
   assert.equal(P.forFKey(all, 5), null)

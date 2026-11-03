@@ -14,7 +14,11 @@ var catalogs = {
     suspend: "Suspend",
     hibernate: "Hibernate",
     reboot: "Reboot",
-    powerOff: "Shut down"
+    powerOff: "Shut down",
+    confirmReboot: "Reboot the computer?",
+    confirmPowerOff: "Shut down the computer?",
+    confirm: "Confirm",
+    cancel: "Cancel"
   },
   pt: {
     otherUser: "Outro usuário…",
@@ -28,7 +32,11 @@ var catalogs = {
     suspend: "Suspender",
     hibernate: "Hibernar",
     reboot: "Reiniciar",
-    powerOff: "Desligar"
+    powerOff: "Desligar",
+    confirmReboot: "Reiniciar o computador?",
+    confirmPowerOff: "Desligar o computador?",
+    confirm: "Confirmar",
+    cancel: "Cancelar"
   }
 }
 

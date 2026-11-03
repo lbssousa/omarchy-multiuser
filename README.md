@@ -38,7 +38,8 @@ points the Omarchy menu at them.
   match;
 - at the bottom, **Suspend** (F1), **Hibernate** (F2), **Reboot** (F3) and
   **Shut down** (F4), by click or key, each only when SDDM says the machine can
-  do it. An action keeps its key when another is missing.
+  do it. An action keeps its key when another is missing. Reboot and Shut down
+  ask first: Enter or a click confirms; Esc, typing or 10 seconds cancels.
 
 SDDM has no way to show PAM's "new password" prompts: it answers translated
 ones with what was typed in the greeter. For such an account that text becomes
