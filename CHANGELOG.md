@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.1 (2026-11-05)
 
 - The only account on an encrypted disk is no longer logged in automatically when the
   disk has a token (TPM2, FIDO2, clevis): it may have opened with nobody typing a
