@@ -8,3 +8,4 @@ ExecStart=/usr/bin/omarchy-mu-login
 
 [Install]
 WantedBy=graphical-session.target
+Also=omarchy-mu-menu-sync.path

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Menu: **System › Switch User** and *Setup › Users*' entries are written in the
+  language Omarchy shows, in all of its languages, with the English label kept for
+  the search. The menu translates only its own rows, so `omarchy-mu-menu-sync` does
+  it, at each login and when the language changes (`omarchy-mu-menu-sync.path`,
+  enabled along with `omarchy-mu-login.service`, and on upgrade where that is).
+
 ## 0.10.1 (2026-11-05)
 
 - The only account on an encrypted disk is no longer logged in automatically when the

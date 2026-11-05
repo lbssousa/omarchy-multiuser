@@ -1,0 +1,11 @@
+[Unit]
+Description=Watch the Omarchy language for the multi-user menu entries (omarchy-multiuser)
+
+[Path]
+# omarchy-language writes it; the menu's own rows follow it live, and this
+# makes the multi-user ones follow too. An XDG_CONFIG_HOME elsewhere is only
+# picked up at the next login, by omarchy-mu-login.
+PathChanged=%h/.config/omarchy/language
+
+[Install]
+WantedBy=default.target
