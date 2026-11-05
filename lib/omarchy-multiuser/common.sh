@@ -15,6 +15,7 @@ OMU_FIDO2_AUTHFILE=${OMU_FIDO2_AUTHFILE:-$OMU_ROOT/etc/fido2/fido2}
 OMU_FPRINT_DIR=${OMU_FPRINT_DIR:-$OMU_ROOT/var/lib/fprint}
 OMU_PAM_DIR=${OMU_PAM_DIR:-$OMU_ROOT/etc/pam.d}
 OMU_SDDM_CONF_DIR=${OMU_SDDM_CONF_DIR:-$OMU_ROOT/etc/sddm.conf.d}
+OMU_SDDM_AUTOLOGIN=${OMU_SDDM_AUTOLOGIN:-$OMU_SDDM_CONF_DIR/zzz-omarchy-mu-autologin.conf}
 OMU_SDDM_THEMES=${OMU_SDDM_THEMES:-$OMU_ROOT/usr/share/sddm/themes}
 OMU_STATE_DIR=${OMU_STATE_DIR:-$OMU_ROOT/var/lib/omarchy-multiuser}
 OMU_LOCK_DIR=${OMU_LOCK_DIR:-$OMU_ROOT/run/lock}
@@ -78,14 +79,84 @@ _omu_programs_end() {
   return 1
 }
 
-# omu_sign_out <user> — end their sessions, then whatever outlives them.
-# Fails when something is still running.
+# Whether loginctl lists a session matching the jq filter on the first console.
+_omu_first_console_has() {
+  local sessions
+  sessions=$(loginctl list-sessions --json=short 2>/dev/null) || return 1
+  jq -e --arg user "${2:-}" "any(.[]; .tty == \"tty1\" and ($1))" <<<"$sessions" >/dev/null 2>&1
+}
+
+# SDDM takes the end of a desktop it logged in automatically, when it is forced,
+# for a crash and shows nothing more on the first console until it is asked.
+# Asking also switches to that console, and that stays: a greeter whose console is
+# taken back before its compositor has set up the screen stays dark for good, and
+# how long that takes depends on the graphics card.
+_omu_login_screen_back() {
+  local active="" _
+  [[ ! -r $OMU_ROOT/sys/class/tty/tty0/active ]] || active=$(<"$OMU_ROOT/sys/class/tty/tty0/active")
+  for _ in {1..10}; do
+    _omu_first_console_has '.class != "greeter"' || break
+    sleep 0.5
+  done
+  sudo busctl call org.freedesktop.DisplayManager /org/freedesktop/DisplayManager/Seat0 \
+    org.freedesktop.DisplayManager.Seat SwitchToGreeter >/dev/null 2>&1 || return 1
+  [[ $active != tty[0-9]* || $active == tty1 ]] ||
+    echo "The login screen takes over the screen. To come back here: Ctrl+Alt+F${active#tty}."
+  for _ in {1..20}; do
+    _omu_first_console_has '.class == "greeter"' && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+# omu_sign_out <user> — end their sessions, then whatever outlives them, and bring
+# back the login screen if their desktop was on the first console. Fails when
+# something is still running.
 omu_sign_out() {
+  local on_first_console=false status=0
+  # shellcheck disable=SC2016  # $user is jq's
+  _omu_first_console_has '.user == $user' "$1" && on_first_console=true
   sudo loginctl terminate-user "$1" 2>/dev/null || true
   if ! _omu_programs_end "$1"; then
     sudo pkill -KILL -u "$1" || true
-    _omu_programs_end "$1"
+    _omu_programs_end "$1" || status=$?
   fi
+  if $on_first_console && ! _omu_login_screen_back; then
+    echo "Warning: the login screen didn't come back on the first console. Reboot, or run: sudo systemctl restart sddm (it ends every open desktop)." >&2
+  fi
+  return "$status"
+}
+
+# SDDM 0.21 starts a new greeter on the first console. An automatic login's
+# desktop holds that console, so the greeter fails there and leaves the desktop
+# dark with no way back. A normal login's desktop has a console of its own, and
+# an earlier greeter on the first one can be gone back to. Not knowing counts as
+# held: the cost of a wrong yes is a dark screen, of a wrong no a missing entry.
+omu_first_console_free() {
+  local sessions
+  sessions=$(loginctl list-sessions --json=short 2>/dev/null) || return 1
+  jq -e 'all(.[]; .tty != "tty1" or .class == "greeter")' <<<"$sessions" >/dev/null 2>&1
+}
+
+# omu_fixed_autologin — /etc/sddm.conf, which outranks every drop-in, names
+# someone to log in automatically: the login screen would never show.
+omu_fixed_autologin() {
+  [[ -f $OMU_ROOT/etc/sddm.conf ]] || return 1
+  awk '/^\[/ { section = $0 }
+    section == "[Autologin]" && /^[ \t]*User[ \t]*=[ \t]*[^ \t]/ { found = 1 }
+    END { exit !found }' "$OMU_ROOT/etc/sddm.conf"
+}
+
+# omu_ask_new_password <header> — prints the password, asked twice until both match.
+omu_ask_new_password() {
+  local first second
+  while :; do
+    first=$(gum input --password --header "$1") || return 1
+    second=$(gum input --password --header "$1, again") || return 1
+    [[ $first != "$second" ]] || break
+    echo "The passwords don't match." >&2
+  done
+  printf '%s' "$first"
 }
 
 # omu_atomic_write <dest> <mode> — stdin to a sibling temp file, then rename,

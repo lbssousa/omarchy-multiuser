@@ -8,6 +8,6 @@ Target = sddm
 Target = omarchy-multiuser
 
 [Action]
-Description = Keeping the multi-user greeter without autologin...
+Description = Keeping the multi-user greeter and its automatic login...
 When = PostTransaction
 Exec = /bin/sh -c '/usr/bin/omarchy-mu-sddm-guard; /usr/bin/omarchy-mu-sddm-sync; exit 0'

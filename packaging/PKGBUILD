@@ -6,14 +6,14 @@
 pkgname=omarchy-multiuser
 pkgver=0.9.0
 pkgrel=1
-pkgdesc='Several users on one Omarchy machine: a greeter listing them, per-user FIDO2/fingerprint, migrations for non-admins'
+pkgdesc='Several people on one Omarchy machine, picked by their own password: per-user disk keys, FIDO2 and fingerprints, migrations for non-admins'
 arch=(any)
 url='https://github.com/lbssousa/omarchy-multiuser'
 license=(MIT)
-depends=(omarchy omarchy-settings sddm qt6-declarative imagemagick sudo jq gum gettext)
+depends=(omarchy omarchy-settings sddm qt6-declarative imagemagick sudo jq gum perl)
 optdepends=('pam-u2f: FIDO2 keys for sudo and polkit'
             'fprintd: fingerprints for sudo, polkit and the lock screen'
-            'cryptsetup: per-user disk unlock passwords')
+            'cryptsetup: each account its own disk key, on encrypted installs')
 checkdepends=(nodejs fakeroot)
 backup=(etc/sddm.conf.d/zz-omarchy-multiuser.conf)
 install=omarchy-multiuser.install
@@ -37,7 +37,7 @@ package() {
   install -Dm644 -t "$pkgdir/usr/share/omarchy-multiuser" share/*
 
   local theme=usr/share/sddm/themes/omarchy-multiuser
-  install -Dm644 -t "$pkgdir/$theme" sddm/omarchy-multiuser/{Main.qml,UserList.js,Strings.js,Password.js,Power.js,theme.conf,metadata.desktop}
+  install -Dm644 -t "$pkgdir/$theme" sddm/omarchy-multiuser/{Main.qml,Strings.js,Password.js,Power.js,theme.conf,metadata.desktop}
   install -Dm644 -t "$pkgdir/$theme/fallback" sddm/omarchy-multiuser/fallback/*.png
 
   local lock=usr/share/omarchy-multiuser/lock-plugin
@@ -45,12 +45,16 @@ package() {
   install -Dm644 -t "$pkgdir/$lock/i18n" shell/lock/i18n/*.json
 
   install -Dm644 -t "$pkgdir/etc/sddm.conf.d" etc/sddm.conf.d/zz-omarchy-multiuser.conf
+  install -Dm644 -t "$pkgdir/etc/mkinitcpio.conf.d" etc/mkinitcpio.conf.d/zz-omarchy-mu-luks-slot.conf
+  install -Dm644 -t "$pkgdir/usr/lib/initcpio/install" initcpio/install/omarchy-mu-luks-slot
+  install -Dm755 -t "$pkgdir/usr/share/omarchy-multiuser/initcpio" initcpio/cryptsetup
   install -Dm440 -t "$pkgdir/etc/sudoers.d" etc/sudoers.d/omarchy-multiuser
   install -Dm644 -t "$pkgdir/usr/share/polkit-1/rules.d" polkit/10-omarchy-multiuser.rules
   install -Dm644 -t "$pkgdir/usr/share/polkit-1/actions" polkit/*.policy
   install -Dm644 -t "$pkgdir/usr/lib/sysusers.d" sysusers.d/omarchy-multiuser.conf
   install -Dm644 -t "$pkgdir/usr/lib/tmpfiles.d" tmpfiles.d/omarchy-multiuser.conf
   install -Dm644 -t "$pkgdir/usr/lib/systemd/system" systemd/system/*
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/system/sddm.service.d" systemd/sddm.service.d/*.conf
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user" systemd/user/*.service
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user/omarchy-migrate-notify.service.d" \
     systemd/user/omarchy-migrate-notify.service.d/*.conf

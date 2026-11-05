@@ -11,10 +11,13 @@
 #   watch-unlock     prints logind's signals for this session until killed
 #   wait-active      exits 0 once this session is in the foreground and has had
 #                    a moment to settle, 1 if it isn't within 5 seconds
-#   switchUser       a new login screen; this session stays locked behind it
+#   switchUser       the login screen; this session stays locked behind it
 #   suspend | reboot | powerOff
 
 set -uo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 
 seat=${XDG_SEAT_PATH:-/org/freedesktop/DisplayManager/Seat0}
 
@@ -27,7 +30,15 @@ logind_can() {
 
 can_switch() {
   [[ $(busctl get-property org.freedesktop.DisplayManager "$seat" \
-    org.freedesktop.DisplayManager.Seat CanSwitch 2>/dev/null) == "b true" ]]
+    org.freedesktop.DisplayManager.Seat CanSwitch 2>/dev/null) == "b true" ]] && omu_first_console_free
+}
+
+# The greeter already running, left by coming straight back to this session.
+# SDDM 0.21 would start a second one on its console, and that one fails with
+# nothing left on the screen.
+greeter_session() {
+  loginctl list-sessions --json=short 2>/dev/null |
+    jq -r 'first(.[] | select(.class == "greeter" and .seat == "seat0") | .session) // empty' 2>/dev/null
 }
 
 # The same conditions as the suspend entry in Omarchy's system menu.
@@ -72,6 +83,10 @@ wait-active)
   exit 1
   ;;
 switchUser)
+  greeter=$(greeter_session)
+  if [[ -n $greeter ]] && loginctl activate "$greeter" 2>/dev/null; then
+    exit 0
+  fi
   busctl call org.freedesktop.DisplayManager "$seat" \
     org.freedesktop.DisplayManager.Seat SwitchToGreeter
   ;;

@@ -8,13 +8,25 @@ _enable_update_units() {
 post_install() {
   systemd-sysusers omarchy-multiuser.conf
   systemd-tmpfiles --create omarchy-multiuser.conf
+  /usr/bin/omarchy-mu-sddm-guard || true
   /usr/bin/omarchy-mu-sddm-sync || true
   _enable_update_units
   echo ":: Enable the watchers and the per-login unit (omarchy-setup does this):"
   echo "   systemctl enable --now omarchy-mu-sddm-guard.path omarchy-mu-sddm-sync.path omarchy-mu-apply-lock.path"
   echo "   systemctl --global enable omarchy-mu-login.service"
-  echo ":: Add users to the omarchy-users group; the greeter changes at the next login screen."
+  echo ":: Add users to the omarchy-users group; the login screen changes the next time it shows."
+  _warn_passwords
   echo ":: With several accounts, lock root's password: omarchy-mu-accounts root-sync"
+  echo ":: Switch user appears after logging out once: an automatic login's desktop can't leave for the login screen."
+}
+
+# The login screen finds the account by its password alone, so a person needs one,
+# nobody else's. Accounts waiting to choose theirs at the login screen can't any more.
+_warn_passwords() {
+  local waiting
+  waiting=$(awk -F: '$2 == "" { print $1 }' /etc/shadow | paste -sd' ' -)
+  [[ -z $waiting ]] || echo ":: These accounts have no password and can't log in: $waiting. Run: omarchy-mu-user-password <user>"
+  echo ":: Each person's password has to be their own, and also opens the disk. Run omarchy-mu-user-password for each of them."
 }
 
 post_upgrade() {
@@ -22,6 +34,10 @@ post_upgrade() {
   /usr/bin/omarchy-mu-sddm-sync || true
   if (( $(vercmp "$2" 0.7.0) < 0 )); then
     _enable_update_units
+  fi
+  if (( $(vercmp "$2" 0.10.0) < 0 )); then
+    /usr/bin/omarchy-mu-sddm-guard || true
+    _warn_passwords
   fi
 }
 
@@ -38,14 +54,31 @@ _restore_lock_screens() {
   done < <(getent passwd)
 }
 
+# systemd keeps these links after their unit file is gone, each one dangling.
+_disable_migration_watchers() {
+  local wants=${1:-/etc/systemd/system/multi-user.target.wants} link
+  for link in "$wants"/omarchy-mu-migrate-record@*.path; do
+    [[ -L $link ]] || continue
+    systemctl disable --now "${link##*/}" >/dev/null 2>&1 || rm -f -- "$link"
+  done
+}
+
 pre_remove() {
+  # First: the guard watches /etc/sddm.conf.d, so cleaning up below would run it,
+  # and it would put back the PAM line that is about to go.
+  systemctl disable --now omarchy-mu-sddm-guard.path omarchy-mu-sddm-sync.path omarchy-mu-apply-lock.path >/dev/null 2>&1 || true
+  systemctl stop omarchy-mu-sddm-guard.service >/dev/null 2>&1 || true
   _restore_lock_screens
   systemctl disable --now omarchy-mu-update-log.path >/dev/null 2>&1 || true
+  _disable_migration_watchers
   rm -f /usr/share/sddm/themes/omarchy-multiuser/theme.conf.user
   systemctl --global disable omarchy-mu-login.service >/dev/null 2>&1 || true
+  rm -f /etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf
+  [[ ! -f /etc/pam.d/sddm ]] || sed -i '/\/usr\/bin\/omarchy-mu-login-match/d' /etc/pam.d/sddm
 }
 
 post_remove() {
   echo ":: SDDM goes back to Omarchy's greeter at the next login screen."
+  echo ":: Each person's disk key stays on the disk; /etc/omarchy-multiuser/slots says whose is whose."
   echo ":: Autologin stays off; Omarchy's tools turn it back on if you want it."
 }

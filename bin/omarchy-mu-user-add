@@ -17,14 +17,13 @@
 # rule when an ISO install granted the owner sudo by name only, and the watcher
 # that records the migrations it runs.
 #
-# The account stays locked until everything else is done. Then its owner chooses
-# the password at the login screen (omarchy-mu-accounts first-login), or, with
-# --set-password or when the greeter can't do that here, it is asked for now.
-# Until it is chosen, whoever reaches the login screen first can choose it.
+# The password is asked here and goes in last: the account stays locked until
+# everything else is done. It is also the account's own key to the disk, and what
+# picks the account at the disk prompt and the login screen, so it must be nobody
+# else's. Adding that key takes your own password.
 #
 # Usage: omarchy-mu-user-add [<user> --full-name <name>] [--email <address>]
-#                            [--admin] [--shell <path>] [--groups g1,g2] [--luks]
-#                            [--set-password]
+#                            [--admin] [--shell <path>] [--groups g1,g2]
 # Without a user name it asks for everything.
 
 set -euo pipefail
@@ -35,7 +34,7 @@ source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 omu_is_admin || omu_die "Only an administrator can add users."
 omu_hold_lock accounts || omu_die "Another account change is in progress."
 
-user="" full_name="" email="" admin=false shell=/bin/bash groups="" luks=false set_password=false
+user="" full_name="" email="" admin=false shell=/bin/bash groups=""
 while (($#)); do
   case $1 in
     --full-name) full_name=${2:-}; shift 2 ;;
@@ -43,8 +42,6 @@ while (($#)); do
     --admin) admin=true; shift ;;
     --shell) shell=${2:-}; shift 2 ;;
     --groups) groups=${2:-}; shift 2 ;;
-    --luks) luks=true; shift ;;
-    --set-password) set_password=true; shift ;;
     -h|--help) sed -n '3,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
     -*) omu_die "Unknown option: $1" ;;
     *) user=$1; shift ;;
@@ -56,8 +53,6 @@ if [[ -z $user ]]; then
   full_name=$(gum input --placeholder "Full name, as the login screen shows it" --header "Full name") || exit 1
   email=$(gum input --placeholder "e-mail (optional, for git)" --header "E-mail") || exit 1
   gum confirm --default=false "Make $user an administrator (wheel)?" && admin=true
-  gum confirm --default=false "Let $user unlock the disk with their own password?" && luks=true
-  gum confirm "Let $user choose their password at the login screen? (Otherwise you set it now.)" || set_password=true
 fi
 
 [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || omu_die "Invalid user name: $user"
@@ -66,6 +61,9 @@ getent group "$user" >/dev/null && omu_die "A group named $user already exists."
 # useradd would keep it, owned by the account it was kept for (the new one
 # never gets that UID), and the new account couldn't use its own home.
 [[ ! -e $OMU_HOME_DIR/$user ]] || omu_die "$OMU_HOME_DIR/$user already exists; move it aside first (sudo mv $OMU_HOME_DIR/$user $OMU_HOME_DIR/$user.old)."
+# It outranks zz-omarchy-multiuser.conf: the first person would keep being logged
+# in automatically, at every boot, with a second one on the machine.
+! omu_fixed_autologin || omu_die "/etc/sddm.conf logs someone in automatically; remove User= from its [Autologin] section first."
 [[ -n ${full_name//[[:space:]]/} ]] || omu_die "A full name is required (the login screen lists it)."
 [[ $full_name != *[:,]* && $full_name != *$'\n'* ]] || omu_die "The full name can't contain ':' ',' or line breaks."
 [[ -x $shell ]] || omu_die "No such shell: $shell"
@@ -76,6 +74,12 @@ $admin && group_list+=",$OMU_ADMIN_GROUP"
 [[ -n $groups ]] && group_list+=",$groups"
 
 uid=$(omu_free_uid) || omu_die "No free UID left."
+
+# Before anything changes: a password someone else has stops here.
+new_password=$(omu_ask_new_password "$user's password") || exit 1
+own_password=$(gum input --password --header "Your password ($(id -un)), the current one") || exit 1
+sudo -v
+printf '%s\n' "$new_password" | sudo omarchy-mu-user-helper check-new || exit 1
 
 sudo groupadd -f "$OMU_USERS_GROUP"
 $admin && sudo omarchy-mu-accounts ensure-wheel-sudo
@@ -103,20 +107,8 @@ if $admin; then
     echo "Warning: the migrations $user runs won't be recorded; run: sudo omarchy-mu-accounts sync-migration-watchers" >&2
 fi
 
-if $luks; then
-  sudo omarchy-mu-luks-enroll --locked "$user"
+if ! printf '%s\n%s\n' "$own_password" "$new_password" | sudo omarchy-mu-user-helper password "$user"; then
+  omu_die "$user has no password yet, so nobody can log in as them. Run: omarchy-mu-user-password $user"
 fi
 
-if ! $set_password && sudo omarchy-mu-accounts first-login "$user"; then
-  omu_info "\n$user chooses their password at their first login: select them on the login screen, type it twice."
-  echo "Until then, anyone at the login screen can choose it."
-  $admin && echo "Warning: $user is an administrator, so that person would get root. Have them log in soon." >&2
-  exit 0
-fi
-
-echo "Set $user's password:"
-until sudo passwd "$user"; do
-  echo "Try again."
-done
-
-omu_info "\n$user can now log in from the login screen."
+omu_info "\n$user can now log in by typing their password, at the disk prompt or the login screen."

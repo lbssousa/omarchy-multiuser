@@ -15,6 +15,18 @@ test("only what the machine can do is offered", () => {
   assert.deepEqual(A.available({ reboot: "true" }), [])
 })
 
+test("F5 doesn't ask for the login screen twice in a row", () => {
+  assert.equal(A.switchUserSettling(1000, 0), false)
+  assert.equal(A.switchUserSettling(10000, 9000), true)
+  assert.equal(A.switchUserSettling(20000, 9000), false)
+})
+
+test("only a clear answer keeps an accepted password from opening the lock", () => {
+  assert.equal(A.isBackgroundAnswer(1), true)
+  assert.equal(A.isBackgroundAnswer(0), false)
+  assert.equal(A.isBackgroundAnswer(127), false)
+})
+
 test("capabilities that can't be read offer nothing", () => {
   assert.deepEqual(A.parseCapabilities('{"reboot":true}'), { reboot: true })
   assert.deepEqual(A.parseCapabilities(""), {})

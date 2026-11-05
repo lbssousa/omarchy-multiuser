@@ -69,6 +69,9 @@ Item {
   // user has given it their password there. Only then does the lock listen, so
   // logind's word never opens a lock nobody left through the login screen.
   property bool awaitingGreeterUnlock: false
+  property double lastSwitchUserMs: 0
+  // PAM said yes and the lock is asking whether this session is on screen.
+  property bool unlockConfirming: false
   // A key that wakes the displays is only waking them, so it can't run anything.
   property bool displayBlanked: false
   property bool strandedLock: false
@@ -226,22 +229,39 @@ Item {
   function runLockAction(action) {
     cancelLockAction()
     if (!lockRequested || lockActionProc.running) return
+    // Only from behind a lock the compositor confirmed, and only once.
+    if (action.id === "switchUser" && (!sessionLock.secure || LockActions.switchUserSettling(Date.now(), lastSwitchUserMs))) return
     enteredPassword = ""
     failureMessage = ""
-    // A session in the background has no business holding the reader: the next
-    // user needs it. Coming back to this one wakes it, which starts it again.
     if (action.id === "switchUser") {
-      pauseFingerprint()
-      if (fingerprintPam.active) fingerprintPam.abort()
-      settleFingerprintAttempt()
+      lastSwitchUserMs = Date.now()
+      releaseFingerprint()
       awaitingGreeterUnlock = true
     }
     lockActionProc.command = ["omarchy-mu-lock-action", action.id]
     lockActionProc.running = true
   }
 
+  // A session in the background has no business holding the reader: the next
+  // user needs it. Coming back to this one wakes it, which starts it again.
+  function releaseFingerprint() {
+    pauseFingerprint()
+    if (fingerprintPam.active) fingerprintPam.abort()
+    settleFingerprintAttempt()
+  }
+
+  // An attempt started before leaving can finish after: a session opened behind
+  // the login screen would be open to whoever comes straight back to its console.
+  // The password stays "checking" until the answer, so nothing else starts.
+  function unlockIfOnScreen() {
+    if (unlockConfirming) return
+    unlockConfirming = true
+    unlockOnScreenCheck.running = true
+  }
+
   function resetAuthenticationState() {
     cancelLockAction()
+    unlockConfirming = false
     awaitingGreeterUnlock = false
     enteredPassword = ""
     pendingPassword = ""
@@ -325,6 +345,12 @@ Item {
   // The retry keeps whatever backoff was armed, counting the time spent blank,
   // so a failing reader still gets its idle window; after a sleep it recovers
   // at once, as the sleep watch does.
+  // For what happens on its own, also behind the login screen: a resume, a screen
+  // coming back. A key or a click only reaches a session on screen.
+  function resumeFingerprintIfOnScreen() {
+    if (fingerprintPaused && !fingerprintOnScreenCheck.running) fingerprintOnScreenCheck.running = true
+  }
+
   function resumeFingerprint() {
     if (!fingerprintPaused) return
     fingerprintPaused = false
@@ -513,7 +539,7 @@ Item {
       // A match after a run of misses is the recovery too; the unlock resets
       // the streak without settling, so log it here or it leaves no trace.
       if (fingerprintUnreachedStreak > 0) logEvent("fingerprint-recovered: streak=" + fingerprintUnreachedStreak)
-      finishUnlock()
+      unlockIfOnScreen()
     } else {
       settleFingerprintAttempt(result === PamResult.Error)
     }
@@ -636,12 +662,15 @@ Item {
     onPamMessage: root.respondToPasswordPrompt()
 
     onCompleted: function(result) {
-      root.authenticatingPassword = false
       root.pendingPassword = ""
 
+      if (root.lockRequested && result === PamResult.Success) {
+        root.unlockIfOnScreen()
+        return
+      }
+      root.authenticatingPassword = false
       if (!root.lockRequested) return
-      if (result === PamResult.Success) root.finishUnlock()
-      else root.handlePasswordFailure()
+      root.handlePasswordFailure()
     }
 
     onError: function(error) {
@@ -732,7 +761,7 @@ Item {
       if (slept && root.lockRequested && root.fingerprintPaused) {
         stop()
         root.fingerprintSleptWhilePaused = true
-        root.resumeFingerprint()
+        root.resumeFingerprintIfOnScreen()
         root.armBlankTimer()
       } else if (slept || !root.fingerprintPaused || --ticksLeft <= 0) {
         stop()
@@ -871,6 +900,33 @@ Item {
     }
   }
 
+  // bash: a command that can't be found has to end in an exit status.
+  Process {
+    id: unlockOnScreenCheck
+    command: ["bash", "-c", "omarchy-mu-lock-action session-active"]
+    onExited: function(exitCode) {
+      if (!root.unlockConfirming) return
+      root.unlockConfirming = false
+      if (!root.lockRequested) return
+      if (!LockActions.isBackgroundAnswer(exitCode)) {
+        root.finishUnlock()
+        return
+      }
+      root.logEvent("unlock-refused: session in the background")
+      root.authenticatingPassword = false
+      root.enteredPassword = ""
+      root.releaseFingerprint()
+    }
+  }
+
+  Process {
+    id: fingerprintOnScreenCheck
+    command: ["bash", "-c", "omarchy-mu-lock-action session-active"]
+    onExited: function(exitCode) {
+      if (!LockActions.isBackgroundAnswer(exitCode)) root.resumeFingerprint()
+    }
+  }
+
   // A question nobody answered doesn't wait for the next Enter.
   Timer {
     id: lockActionTimeout
@@ -954,7 +1010,7 @@ Item {
     function onScreensChanged() {
       var screens = root.realScreenCount()
       if (screens > root.knownScreenCount) {
-        root.resumeFingerprint()
+        root.resumeFingerprintIfOnScreen()
         if (root.lockRequested) root.armBlankTimer()
       }
       root.knownScreenCount = screens
@@ -1008,6 +1064,18 @@ Item {
       // omarchy-system-sleep-lock asks for the lock before every suspend.
       if (root.currentlyLocked()) root.noteSleepRequested()
       if (!root.currentlyLocked() && !root.beginLock()) return "failed"
+      return "ok"
+    }
+
+    // For omarchy-mu-user-switch (System > Switch User).
+    function switchUser(): string {
+      if (!root.lockRequested || !sessionLock.secure) return "not-locked"
+      root.runLockAction({ id: "switchUser" })
+      return "ok"
+    }
+
+    function releaseReader(): string {
+      root.releaseFingerprint()
       return "ok"
     }
 

@@ -6,13 +6,18 @@
 #
 #   $T/running       accounts with programs running (pgrep); signing them out
 #                    empties it, except for those also in $T/unkillable
-#   $T/gum-answers   gum confirm's answers, one per call: y, n or c (cancel)
+#   $T/gum-answers   gum's answers, one per call: y, n or c (cancel) to confirm,
+#                    the text to input, which is sekret-pw with none left
 #   $T/sudo-l        what sudo -l -U prints, instead of "not allowed"
 #   $T/userdel-fails account: nothing happens; home: the account goes, its
 #                    home stays
+#   $T/sessions      what loginctl lists, as JSON; signing out empties it
+#   $T/busctl-fails  asking SDDM for its login screen fails; otherwise that adds
+#                    a greeter to the first console
 user_stubs() {
   mkdir -p "$T/stubs" "$T/etc/sudoers.d" "$T/etc/systemd/system/multi-user.target.wants" "$T/run/lock" "$T/home"
   : >"$T/run/lock/omarchy-mu-accounts.lock"
+  : >"$T/run/lock/omarchy-mu-slots.lock"
   : >"$T/etc/shadow"
   : >"$T/calls"
   cat >"$T/stubs/getent" <<'STUB'
@@ -94,6 +99,8 @@ cat >/dev/null
 STUB
   cat >"$T/stubs/sudo" <<'STUB'
 #!/bin/bash
+[[ $1 != -v ]] || exit 0
+[[ $1 != -n ]] || shift
 if [[ $1 == -l ]]; then
   if [[ -f $T/sudo-l ]]; then cat "$T/sudo-l"; else echo "User $3 is not allowed to run sudo on this host."; fi
   exit 0
@@ -111,11 +118,22 @@ grep -qx "${*: -1}" "$T/unkillable" 2>/dev/null || sed -i "/^${*: -1}$/d" "$T/ru
 STUB
   cat >"$T/stubs/loginctl" <<'STUB'
 #!/bin/bash
+if [[ $1 == list-sessions ]]; then
+  cat "$T/sessions" 2>/dev/null || echo '[]'
+  exit 0
+fi
 echo "loginctl $*" >>"$T/calls"
 if [[ $1 == terminate-user ]] && ! grep -qx "$2" "$T/unkillable" 2>/dev/null; then
   sed -i "/^$2$/d" "$T/running" 2>/dev/null
+  rm -f "$T/sessions"
 fi
 exit 0
+STUB
+  cat >"$T/stubs/busctl" <<'STUB'
+#!/bin/bash
+echo "busctl $*" >>"$T/calls"
+[[ ! -e $T/busctl-fails ]] || exit 1
+echo '[{"session":"c1","user":"sddm","seat":"seat0","class":"greeter","tty":"tty1"}]' >"$T/sessions"
 STUB
   # Enabling a watcher is its WantedBy symlink.
   cat >"$T/stubs/systemctl" <<'STUB'
@@ -132,30 +150,26 @@ STUB
 #!/bin/bash
 echo "gum $*" >>"$T/calls"
 answer=$(head -1 "$T/gum-answers"); sed -i 1d "$T/gum-answers"
+if [[ $1 == input ]]; then
+  echo "${answer:-sekret-pw}"
+  exit 0
+fi
 case $answer in
   y) exit 0 ;;
   c) exit 130 ;;
   *) exit 1 ;;
 esac
 STUB
-  cat >"$T/stubs/passwd" <<'STUB'
+  # Reads the passwords like the real one; $T/helper-fails names an action that fails.
+  cat >"$T/stubs/omarchy-mu-user-helper" <<'STUB'
 #!/bin/bash
-echo "passwd $*" >>"$T/calls"
-[[ ! -e $T/passwd-fails ]] || exit 1
-[[ $1 == -d && $2 == -e ]] || exit 0
-sed -i -E "s/^($3):[^:]*:[^:]*:/\1::0:/" "$T/etc/shadow"
-STUB
-  # PAM's catalog, by the language the caller asks for.
-  cat >"$T/stubs/gettext" <<'STUB'
-#!/bin/bash
-case ${LC_ALL:-} in
-  pt*) printf 'Nova senha: ' ;;
-  *) printf '%s' "${*: -1}" ;;
-esac
+echo "omarchy-mu-user-helper $*" >>"$T/calls"
+[[ $1 == forget ]] || cat >>"$T/helper-stdin"
+[[ $(cat "$T/helper-fails" 2>/dev/null) != "$1" ]]
 STUB
   # Nothing to do for the commands that have their own tests, or need hardware.
   local cmd
-  for cmd in runuser fprintd-delete omarchy-mu-fido2-authfile omarchy-mu-luks-enroll omarchy-mu-apply-lock; do
+  for cmd in runuser fprintd-delete omarchy-mu-fido2-authfile omarchy-mu-apply-lock; do
     # shellcheck disable=SC2016  # $* and $T belong to the stub
     printf '#!/bin/bash\necho "%s $*" >>"$T/calls"\n' "$cmd" >"$T/stubs/$cmd"
   done

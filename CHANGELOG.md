@@ -1,5 +1,49 @@
 # Changelog
 
+## Unreleased
+
+**The password says who you are**, as in Omarchy PR #16920. This replaces the list of
+users on the login screen. See "Coming from an earlier version" in the README.
+
+- Each account's password is also its own LUKS key slot, on encrypted installs, in
+  `/etc/omarchy-multiuser/slots`. It has at least 6 characters and is nobody else's.
+- The disk prompt picks the person: the boot image notes which slot opened the disk
+  (`omarchy-mu-luks-slot`), and `omarchy-mu-login-select` opens that person's desktop,
+  once. With one account on an encrypted disk, it is logged in.
+- The login screen is a password box that finds the account (`omarchy-mu-login-match`).
+  The user list, **Other user…** and choosing a password at the first login are gone.
+- `omarchy-mu-user-password` changes a password everywhere at once, also from
+  *Update › Password › User*. `omarchy-mu-user-helper` does it as root, journaled.
+- `omarchy-mu-user-add` asks for the new password and yours; `--luks` and
+  `--set-password` are gone. `omarchy-mu-user-remove` takes the key off the disk without
+  anyone's disk password. `omarchy-mu-luks-enroll` and `omarchy-mu-accounts first-login`
+  are gone.
+- Logging out a desktop opened by the disk prompt, when removing an account or taking
+  its rights, brings the login screen back: SDDM shows nothing there after a forced end.
+- Greeter: typing and the F keys work again after going to another console and back.
+- Removing the package turns off its path units first, which kept the PAM line in place,
+  and leaves no dangling link to the migration watchers.
+- Depends on `perl`, no longer on `gettext`.
+
+Also from Omarchy PRs #16100 and #16920, and the session-switching findings posted there.
+
+- Lock screen: **Switch user** isn't offered while a desktop holds the first
+  console, as an automatic login's does until its first logout. SDDM's greeter
+  fails there and leaves the screen dark.
+- Lock screen: a login screen already running is gone back to instead of asking
+  for a second one, which fails on the same console; F5 can't ask twice in a row.
+- Lock screen: a password or fingerprint accepted once the session is in the
+  background doesn't open it, and neither a resume nor a screen coming back gives
+  a session in the background the fingerprint reader.
+- Menu: **System › Switch User** (`omarchy-mu-user-switch`) locks this desktop, then
+  opens the person's running session or the login screen.
+- Menu: *Setup › Users*' entries no longer turn up in the search of users outside
+  wheel.
+- `omarchy-mu-user-add` refuses while `/etc/sddm.conf` logs someone in automatically.
+- `omarchy-mu-user-remove` stops when the account's key can't be taken off the disk,
+  instead of saying it removed the account while that password still opens the disk.
+- SDDM: `ReuseSession=true` is set here, since coming back to a session relies on it.
+
 ## 0.9.0 (2026-11-03)
 
 The lock screen can switch user and turn the machine off without unlocking.

@@ -41,6 +41,21 @@ function forFKey(offered, n) {
   return null
 }
 
+// F5 asks for the login screen, which takes a moment to appear. Asking again
+// meanwhile would start a second one, which SDDM can't show.
+var SWITCH_USER_SETTLE_MS = 5000
+
+function switchUserSettling(now, lastAskedMs) {
+  return lastAskedMs > 0 && now - lastAskedMs < SWITCH_USER_SETTLE_MS
+}
+
+// The exit status of `omarchy-mu-lock-action session-active` that means the session
+// is in the background. Anything else, a command that couldn't run included, must
+// not leave someone at their own lock unable to open it.
+function isBackgroundAnswer(exitCode) {
+  return exitCode === 1
+}
+
 // A line from `omarchy-mu-lock-action watch-unlock` meaning logind was told to
 // unlock the session it watches. Exactly that line: the rest is gdbus talking.
 function isUnlockSignal(line) {
@@ -53,6 +68,8 @@ if (typeof module !== "undefined") {
     parseCapabilities: parseCapabilities,
     available: available,
     forFKey: forFKey,
+    switchUserSettling: switchUserSettling,
+    isBackgroundAnswer: isBackgroundAnswer,
     isUnlockSignal: isUnlockSignal
   }
 }

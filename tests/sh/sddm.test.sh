@@ -39,34 +39,6 @@ test_sync_without_stock_theme_removes_override() {
   assert_no_file "$(themes)/omarchy-multiuser/theme.conf.user"
 }
 
-test_sync_lists_first_login_accounts() {
-  setup_themes
-  # shellcheck disable=SC2016  # a literal shadow hash, not an expansion
-  printf '%s\n' 'abutre:$6$hash:20000:0:99999:7:::' 'surubi::0:0:99999:7:::' \
-    'coruja::0:0:99999:7:::' 'locked:!:0:0:99999:7:::' 'blank::20000:0:99999:7:::' >"$T/etc/shadow"
-  omarchy-mu-sddm-sync >/dev/null
-  conf="$(themes)/omarchy-multiuser/theme.conf.user"
-  assert_contains "$conf" "passwordChangeUsers=surubi coruja"
-}
-
-test_sync_drops_accounts_once_they_chose() {
-  setup_themes
-  printf '%s\n' 'surubi::0:0:99999:7:::' >"$T/etc/shadow"
-  omarchy-mu-sddm-sync >/dev/null
-  # shellcheck disable=SC2016  # a literal shadow hash, not an expansion
-  printf '%s\n' 'surubi:$6$hash:20000:0:99999:7:::' >"$T/etc/shadow"
-  omarchy-mu-sddm-sync >/dev/null
-  assert_not_contains "$(themes)/omarchy-multiuser/theme.conf.user" "passwordChangeUsers"
-}
-
-test_sync_keeps_first_login_accounts_without_colors() {
-  setup_themes
-  rm -rf "$(themes)/omarchy"
-  printf '%s\n' 'surubi::0:0:99999:7:::' >"$T/etc/shadow"
-  omarchy-mu-sddm-sync >/dev/null
-  assert_eq "$(cat "$(themes)/omarchy-multiuser/theme.conf.user")" $'[General]\npasswordChangeUsers=surubi'
-}
-
 test_guard_removes_autologin() {
   setup_themes
   cp "$REPO/etc/sddm.conf.d/zz-omarchy-multiuser.conf" "$T/etc/sddm.conf.d/"
@@ -84,6 +56,58 @@ test_guard_reports_sddm_conf_autologin() {
   printf '[Autologin]\nUser=abutre\n' >"$T/etc/sddm.conf"
   omarchy-mu-sddm-guard 2>/dev/null && fail "missed /etc/sddm.conf autologin"
   true
+}
+
+test_guard_leaves_the_automatic_login_of_this_boot_alone() {
+  setup_themes
+  cp "$REPO/etc/sddm.conf.d/zz-omarchy-multiuser.conf" "$T/etc/sddm.conf.d/"
+  printf '[Autologin]\nUser=abutre\nSession=omarchy.desktop\nRelogin=false\n' >"$T/etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf"
+  omarchy-mu-sddm-guard >/dev/null || fail "took login-select's choice for a problem"
+  assert_file "$T/etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf"
+}
+
+test_guard_puts_login_match_first_in_the_pam_stack_once() {
+  setup_themes
+  cp "$REPO/etc/sddm.conf.d/zz-omarchy-multiuser.conf" "$T/etc/sddm.conf.d/"
+  mkdir -p "$T/etc/pam.d"
+  printf '#%%PAM-1.0\n\nauth        include     system-login\n-auth       optional    pam_kwallet5.so\n\naccount     include     system-login\n' >"$T/etc/pam.d/sddm"
+  omarchy-mu-sddm-guard --check 2>/dev/null && fail "check passed without it"
+  omarchy-mu-sddm-guard >/dev/null || fail "guard failed"
+  assert_eq "$(grep -E '^-?auth' "$T/etc/pam.d/sddm" | head -1)" "auth        [success=die default=ignore] pam_exec.so quiet expose_authtok /usr/bin/omarchy-mu-login-match"
+  assert_eq "$(grep -c omarchy-mu-login-match "$T/etc/pam.d/sddm")" 1
+  cp "$T/etc/pam.d/sddm" "$T/once"
+  omarchy-mu-sddm-guard >/dev/null
+  cmp -s "$T/once" "$T/etc/pam.d/sddm" || fail "second run changed the stack"
+  omarchy-mu-sddm-guard --check || fail "check failed with it"
+}
+
+test_removing_the_package_stops_the_guard_before_cleaning_up() {
+  install=$REPO/packaging/omarchy-multiuser.install
+  stop=$(grep -n 'disable --now omarchy-mu-sddm-guard.path' "$install" | cut -d: -f1)
+  clean=$(grep -n 'rm -f /etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf' "$install" | cut -d: -f1)
+  [[ -n $stop && -n $clean && $stop -lt $clean ]] || fail "the guard would put the PAM line back"
+}
+
+test_removing_the_package_leaves_no_migration_watcher_behind() {
+  wants=$T/wants
+  mkdir -p "$wants"
+  ln -s /dev/null "$wants/omarchy-mu-migrate-record@ana.path"
+  ln -s /dev/null "$wants/omarchy-mu-migrate-record@bob.path"
+  ln -s /dev/null "$wants/other.path"
+  # systemctl gets to ana's and fails on bob's, whose link has to go anyway.
+  # shellcheck disable=SC2329  # called by the install script
+  systemctl() {
+    echo "$*" >>"$T/calls"
+    [[ $3 == *@ana.path ]] && rm -f "$wants/$3"
+    [[ $3 == *@ana.path ]]
+  }
+  # shellcheck source=/dev/null  # only defines functions
+  source "$REPO/packaging/omarchy-multiuser.install"
+  _disable_migration_watchers "$wants"
+  assert_eq "$(ls "$wants")" "other.path"
+  assert_contains "$T/calls" "disable --now omarchy-mu-migrate-record@ana.path"
+  assert_contains "$T/calls" "disable --now omarchy-mu-migrate-record@bob.path"
+  grep -q '^  _disable_migration_watchers$' "$REPO/packaging/omarchy-multiuser.install" || fail "pre_remove doesn't call it"
 }
 
 test_guard_reports_wrong_theme() {

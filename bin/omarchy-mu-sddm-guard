@@ -1,16 +1,15 @@
 #!/bin/bash
 
-# omarchy:summary=Keep SDDM showing the multi-user greeter, with no autologin
+# omarchy:summary=Keep SDDM on the multi-user greeter, with only the automatic login it chooses
 # omarchy:requires-sudo=true
 # omarchy:hidden=true
 #
 # Omarchy logs its single owner in automatically: omarchy-provision-owner and
-# omarchy-upgrade-to-quattro write /etc/sddm.conf.d/autologin.conf, which
-# stays on for good on encrypted installs, and unencrypted ones get a
-# self-deleting omarchy-provision-autologin-once.service. With several users
-# that skips the greeter, so this removes both. The package's
-# zz-omarchy-multiuser.conf (read last, with an empty [Autologin]) already
-# overrides them; this keeps the files from lingering and checks the result.
+# omarchy-upgrade-to-quattro write /etc/sddm.conf.d/autologin.conf, and unencrypted
+# installs get a self-deleting omarchy-provision-autologin-once.service. Who is
+# logged in is omarchy-mu-login-select's to say, at each SDDM start, so this removes
+# both, and checks the result. It also keeps omarchy-mu-login-match first in SDDM's
+# PAM stack, where an upgrade of sddm may leave a new /etc/pam.d/sddm without it.
 #
 # Run by omarchy-mu-sddm-guard.path when /etc/sddm.conf.d changes and by the
 # pacman hook. Never restarts sddm, which would end every open session.
@@ -25,6 +24,21 @@ source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 check=false
 [[ ${1:-} == --check ]] && check=true
 problems=0
+
+# Before the first auth line, whatever its indentation; only an active line counts.
+login_match="auth        [success=die default=ignore] pam_exec.so quiet expose_authtok /usr/bin/omarchy-mu-login-match"
+pam=$OMU_PAM_DIR/sddm
+if [[ -f $pam ]] && ! grep -Eq '^[[:space:]]*auth[[:space:]].*/usr/bin/omarchy-mu-login-match' "$pam"; then
+  if $check; then
+    echo "login-match: not in $pam" >&2
+    problems=1
+  elif grep -Eq '^[[:space:]]*-?auth[[:space:]]' "$pam"; then
+    sed -E -i "0,/^[[:space:]]*-?auth[[:space:]]/s||$login_match\n&|" "$pam"
+    echo "Added omarchy-mu-login-match to $pam."
+  else
+    echo "No auth line in $pam; the login screen will count a wrong account as a failed login." >&2
+  fi
+fi
 
 autologin=$OMU_SDDM_CONF_DIR/autologin.conf
 if [[ -e $autologin || -L $autologin ]]; then
@@ -46,12 +60,12 @@ fi
 
 # SDDM reads /etc/sddm.conf.d/*.conf in name order, then /etc/sddm.conf; the
 # last value of a key wins. Report what the effective theme and autologin
-# user are.
+# user are, leaving out the automatic login omarchy-mu-login-select chose.
 effective() {
   local section=$1 key=$2 file value=""
   local files=("$OMU_SDDM_CONF_DIR"/*.conf "$OMU_ROOT/etc/sddm.conf")
   for file in "${files[@]}"; do
-    [[ -f $file ]] || continue
+    [[ -f $file && $file != "$OMU_SDDM_AUTOLOGIN" ]] || continue
     local v
     v=$(awk -F= -v s="[$section]" -v k="$key" '
       /^\[/ { insec = ($0 == s) }
