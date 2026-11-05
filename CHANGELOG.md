@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 (2026-11-05)
 
 **The password says who you are**, as in Omarchy PR #16920. This replaces the list of
 users on the login screen. See "Coming from an earlier version" in the README.
