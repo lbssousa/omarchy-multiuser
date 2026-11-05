@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick 2.15
+import QtQuick.Window 2.15
 import SddmComponents 2.0
 import "Strings.js" as Strings
 import "Password.js" as Password
@@ -396,6 +397,14 @@ Rectangle {
       onClicked: root.pendingPower = null
     }
   }
+
+  // Going to another console and back takes the keyboard away, and Qt drops the
+  // field's focus with it. Nothing gives it back when the keyboard returns, so typing
+  // and the F keys went nowhere until the field was clicked.
+  function restorePasswordFocus() {
+    if (!password.input.activeFocus) password.input.forceActiveFocus()
+  }
+  Window.onActiveFocusItemChanged: Qt.callLater(restorePasswordFocus)
 
   Component.onCompleted: password.input.forceActiveFocus()
 }

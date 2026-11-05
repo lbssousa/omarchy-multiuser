@@ -317,6 +317,7 @@ omu_journal_put() {
 }
 
 omu_journal_clear() {
+  # shellcheck disable=SC2015  # a failed sync doesn't matter once the file is gone
   rm -f "$OMU_SLOT_JOURNAL" && sync "${OMU_SLOT_JOURNAL%/*}" 2>/dev/null || [[ ! -e $OMU_SLOT_JOURNAL ]]
 }
 

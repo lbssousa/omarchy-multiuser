@@ -45,6 +45,7 @@ STUB
   export SUDO_USER=owner ME=owner
   export OMU_SYSTEM_DRIVE=$T/disk
   truncate -s 32M "$T/disk"
+  # shellcheck disable=SC2086  # options, split on purpose
   printf '%s' "$OWNER" | cryptsetup luksFormat -q $OMU_LUKS_PBKDF --key-file - "$T/disk" || fail "no LUKS image"
   UUID=$(cryptsetup luksUUID "$T/disk")
   map=$T/etc/omarchy-multiuser/slots

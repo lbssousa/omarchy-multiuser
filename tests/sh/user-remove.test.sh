@@ -34,6 +34,48 @@ test_a_disk_password_that_stays_keeps_the_account() {
   assert_not_contains "$T/calls" userdel
 }
 
+on_first_console() {
+  printf '[{"session":"1","user":"%s","seat":"seat0","class":"user","tty":"tty1"}]\n' "$1" >"$T/sessions"
+  mkdir -p "$T/sys/class/tty/tty0"
+  echo "$2" >"$T/sys/class/tty/tty0/active"
+  echo bob >>"$T/running"
+  printf 'y\ny\n' >"$T/gum-answers"
+}
+
+test_a_desktop_on_the_first_console_leaves_the_login_screen() {
+  setup
+  on_first_console bob tty3
+  omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_contains "$T/calls" "SwitchToGreeter"
+  (( $(call_line "loginctl terminate-user bob") < $(call_line SwitchToGreeter) )) || fail "asked before the desktop ended"
+  assert_contains "$T/out" "Ctrl+Alt+F3"
+  assert_not_contains "$T/out" "didn't come back"
+}
+
+test_there_is_no_console_to_come_back_to_from_the_first_one() {
+  setup
+  on_first_console bob tty1
+  omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_contains "$T/calls" "SwitchToGreeter"
+  assert_not_contains "$T/out" "Ctrl+Alt"
+}
+
+test_a_login_screen_that_cant_come_back_only_warns() {
+  setup
+  on_first_console bob tty3
+  : >"$T/busctl-fails"
+  omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_contains "$T/out" "didn't come back"
+  assert_contains "$T/out" "Removed bob."
+}
+
+test_someone_elses_desktop_on_the_first_console_is_left_alone() {
+  setup
+  on_first_console carol tty3
+  omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_not_contains "$T/calls" SwitchToGreeter
+}
+
 test_removes_account_and_what_it_leaves_behind() {
   setup
   printf 'bob ALL=(ALL) ALL\n' >"$T/etc/sudoers.d/10_bob"

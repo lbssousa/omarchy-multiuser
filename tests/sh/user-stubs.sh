@@ -11,6 +11,9 @@
 #   $T/sudo-l        what sudo -l -U prints, instead of "not allowed"
 #   $T/userdel-fails account: nothing happens; home: the account goes, its
 #                    home stays
+#   $T/sessions      what loginctl lists, as JSON; signing out empties it
+#   $T/busctl-fails  asking SDDM for its login screen fails; otherwise that adds
+#                    a greeter to the first console
 user_stubs() {
   mkdir -p "$T/stubs" "$T/etc/sudoers.d" "$T/etc/systemd/system/multi-user.target.wants" "$T/run/lock" "$T/home"
   : >"$T/run/lock/omarchy-mu-accounts.lock"
@@ -115,11 +118,22 @@ grep -qx "${*: -1}" "$T/unkillable" 2>/dev/null || sed -i "/^${*: -1}$/d" "$T/ru
 STUB
   cat >"$T/stubs/loginctl" <<'STUB'
 #!/bin/bash
+if [[ $1 == list-sessions ]]; then
+  cat "$T/sessions" 2>/dev/null || echo '[]'
+  exit 0
+fi
 echo "loginctl $*" >>"$T/calls"
 if [[ $1 == terminate-user ]] && ! grep -qx "$2" "$T/unkillable" 2>/dev/null; then
   sed -i "/^$2$/d" "$T/running" 2>/dev/null
+  rm -f "$T/sessions"
 fi
 exit 0
+STUB
+  cat >"$T/stubs/busctl" <<'STUB'
+#!/bin/bash
+echo "busctl $*" >>"$T/calls"
+[[ ! -e $T/busctl-fails ]] || exit 1
+echo '[{"session":"c1","user":"sddm","seat":"seat0","class":"greeter","tty":"tty1"}]' >"$T/sessions"
 STUB
   # Enabling a watcher is its WantedBy symlink.
   cat >"$T/stubs/systemctl" <<'STUB'

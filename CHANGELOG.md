@@ -18,6 +18,9 @@ users on the login screen. See "Coming from an earlier version" in the README.
   `--set-password` are gone. `omarchy-mu-user-remove` takes the key off the disk without
   anyone's disk password. `omarchy-mu-luks-enroll` and `omarchy-mu-accounts first-login`
   are gone.
+- Logging out a desktop opened by the disk prompt, when removing an account or taking
+  its rights, brings the login screen back: SDDM shows nothing there after a forced end.
+- Greeter: typing and the F keys work again after going to another console and back.
 - Depends on `perl`, no longer on `gettext`.
 
 Also from Omarchy PRs #16100 and #16920, and the session-switching findings posted there.

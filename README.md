@@ -28,7 +28,8 @@ points the Omarchy menu at them.
 - **Switch user** (F5): the login screen, the session staying locked behind it;
 - **Suspend** (F1), **Reboot** (F3) and **Shut down** (F4), the greeter's keys.
   Reboot and Shut down ask first: Enter or a click confirms; Esc, typing or
-  10 seconds cancels. A key or click that wakes a dark screen only wakes it.
+  10 seconds cancels. A click or an F key that wakes a dark screen only wakes it;
+  a letter or a space also goes into the password box, as on Omarchy's own lock.
 
 Each is there only when the machine can do it (`omarchy-mu-lock-action
 capabilities`); Suspend follows the same switches as the system menu. Switch user
@@ -204,7 +205,9 @@ administrators can open them.
   (`--keep-home` and `--delete-home` answer for it; keeping is the default
   answer), and every question comes before anything changes. An account with
   programs running, in a session or not, is logged out if you agree, and its
-  lingering turned off. A home holding the note of an unfinished disk password
+  lingering turned off. SDDM shows nothing on the first console after a desktop it
+  logged in automatically is forced to end, so it is asked for the login screen,
+  which takes over the screen; Ctrl+Alt+F*n* goes back to your console. A home holding the note of an unfinished disk password
   change (`drive-password.state`) isn't deleted. System accounts are refused,
   and the last administrator is the last one who can log in.
 - **Administrator rights.** `omarchy-mu-user-admin <user> on|off`

@@ -79,14 +79,52 @@ _omu_programs_end() {
   return 1
 }
 
-# omu_sign_out <user> — end their sessions, then whatever outlives them.
-# Fails when something is still running.
+# Whether loginctl lists a session matching the jq filter on the first console.
+_omu_first_console_has() {
+  local sessions
+  sessions=$(loginctl list-sessions --json=short 2>/dev/null) || return 1
+  jq -e --arg user "${2:-}" "any(.[]; .tty == \"tty1\" and ($1))" <<<"$sessions" >/dev/null 2>&1
+}
+
+# SDDM takes the end of a desktop it logged in automatically, when it is forced,
+# for a crash and shows nothing more on the first console until it is asked.
+# Asking also switches to that console, and that stays: a greeter whose console is
+# taken back before its compositor has set up the screen stays dark for good, and
+# how long that takes depends on the graphics card.
+_omu_login_screen_back() {
+  local active="" _
+  [[ ! -r $OMU_ROOT/sys/class/tty/tty0/active ]] || active=$(<"$OMU_ROOT/sys/class/tty/tty0/active")
+  for _ in {1..10}; do
+    _omu_first_console_has '.class != "greeter"' || break
+    sleep 0.5
+  done
+  sudo busctl call org.freedesktop.DisplayManager /org/freedesktop/DisplayManager/Seat0 \
+    org.freedesktop.DisplayManager.Seat SwitchToGreeter >/dev/null 2>&1 || return 1
+  [[ $active != tty[0-9]* || $active == tty1 ]] ||
+    echo "The login screen takes over the screen. To come back here: Ctrl+Alt+F${active#tty}."
+  for _ in {1..20}; do
+    _omu_first_console_has '.class == "greeter"' && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+# omu_sign_out <user> — end their sessions, then whatever outlives them, and bring
+# back the login screen if their desktop was on the first console. Fails when
+# something is still running.
 omu_sign_out() {
+  local on_first_console=false status=0
+  # shellcheck disable=SC2016  # $user is jq's
+  _omu_first_console_has '.user == $user' "$1" && on_first_console=true
   sudo loginctl terminate-user "$1" 2>/dev/null || true
   if ! _omu_programs_end "$1"; then
     sudo pkill -KILL -u "$1" || true
-    _omu_programs_end "$1"
+    _omu_programs_end "$1" || status=$?
   fi
+  if $on_first_console && ! _omu_login_screen_back; then
+    echo "Warning: the login screen didn't come back on the first console. Reboot, or run: sudo systemctl restart sddm (it ends every open desktop)." >&2
+  fi
+  return "$status"
 }
 
 # SDDM 0.21 starts a new greeter on the first console. An automatic login's
