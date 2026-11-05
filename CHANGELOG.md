@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The only account on an encrypted disk is no longer logged in automatically when the
+  disk has a token (TPM2, FIDO2, clevis): it may have opened with nobody typing a
+  password, which started the machine into an open desktop. The login screen shows.
+
 ## 0.10.0 (2026-11-05)
 
 **The password says who you are**, as in Omarchy PR #16920. This replaces the list of

@@ -9,6 +9,8 @@
 # login. The second run then names, in the last-sorting drop-in, the one account on
 # an encrypted disk or, with more than one, the account whose key slot unlocked the
 # disk this boot, used once. Anything it can't be sure of shows the login screen.
+# A disk with a token (TPM2, FIDO2, clevis) may have opened with nobody typing a
+# password, so there even the one account needs its slot on record.
 #
 # Usage: omarchy-mu-login-select [--clear]
 
@@ -51,9 +53,9 @@ consume_slot_record() {
 omu_load_drive || exit 1
 omu_encrypted || exit 0
 
-if (( ${#accounts[@]} == 1 )); then
+if (( ${#accounts[@]} == 1 )) && ! omu_drive_has_tokens; then
   autologin "${accounts[0]}"
-elif (( ${#accounts[@]} > 1 )); then
+elif (( ${#accounts[@]} > 0 )); then
   read -r uuid slot < <(consume_slot_record) || exit 0
   [[ $uuid == "$OMU_UUID" && $slot =~ ^[0-9]+$ ]] || exit 0
   ! omu_journal_pending || exit 0

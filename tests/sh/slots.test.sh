@@ -326,6 +326,29 @@ test_one_account_on_an_encrypted_disk_is_logged_in() {
   assert_contains "$(autologin_file)" "User=owner"
 }
 
+# What systemd-cryptenroll writes, without a TPM behind it.
+TPM2_TOKEN='{"type":"systemd-tpm2","keyslots":["0"],"tpm2-blob":"","tpm2-pcrs":[7],"tpm2-pcr-bank":"sha256","tpm2-primary-alg":"ecc","tpm2-policy-hash":""}'
+
+test_one_account_on_a_disk_a_token_opens_gets_the_login_screen() {
+  setup
+  sed -i '/^bob:/d' "$T/etc/passwd"
+  for token in "$TPM2_TOKEN" '{"type":"clevis","keyslots":["0"],"jwe":{}}'; do
+    cryptsetup token remove --token-id 0 "$T/disk" 2>/dev/null
+    printf '%s' "$token" | cryptsetup token import --token-id 0 "$T/disk" >/dev/null || fail "no token"
+    select_login
+    assert_no_file "$(autologin_file)"
+  done
+}
+
+test_a_token_leaves_the_slot_on_record_to_choose() {
+  setup
+  give_bob_a_password
+  printf '%s' "$TPM2_TOKEN" | cryptsetup token import "$T/disk" >/dev/null || fail "no token"
+  record "$UUID" 1
+  select_login || fail "select"
+  assert_contains "$(autologin_file)" "User=bob"
+}
+
 test_an_unencrypted_machine_is_never_logged_in() {
   setup
   sed -i '/^bob:/d' "$T/etc/passwd"

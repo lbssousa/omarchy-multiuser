@@ -74,7 +74,8 @@ The model comes from [Omarchy PR #16920](https://github.com/omacom/omarchy/pull/
   automatic login for the slot's owner. Anything else shows the login screen: no
   record, an unknown slot, a password changed with plain `passwd`, a change left
   unfinished, a second SDDM start. With one account on an encrypted disk, that account
-  is logged in, as Omarchy does.
+  is logged in, as Omarchy does, unless the disk has a token (TPM2, FIDO2, clevis):
+  it may have opened with nobody typing a password, so the login screen shows.
 - **The login screen is a password box alone.** Enter tries it for the last account,
   then each other one SDDM lists, until one logs in. `omarchy-mu-login-match` runs first
   in `/etc/pam.d/sddm` (`omarchy-mu-sddm-guard` keeps it there) and ends an attempt when
