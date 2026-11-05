@@ -81,6 +81,13 @@ test_guard_puts_login_match_first_in_the_pam_stack_once() {
   omarchy-mu-sddm-guard --check || fail "check failed with it"
 }
 
+test_removing_the_package_stops_the_guard_before_cleaning_up() {
+  install=$REPO/packaging/omarchy-multiuser.install
+  stop=$(grep -n 'disable --now omarchy-mu-sddm-guard.path' "$install" | cut -d: -f1)
+  clean=$(grep -n 'rm -f /etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf' "$install" | cut -d: -f1)
+  [[ -n $stop && -n $clean && $stop -lt $clean ]] || fail "the guard would put the PAM line back"
+}
+
 test_guard_reports_wrong_theme() {
   setup_themes
   printf '[Theme]\nCurrent=omarchy\n' >"$T/etc/sddm.conf.d/10-theme.conf"

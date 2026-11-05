@@ -55,6 +55,10 @@ _restore_lock_screens() {
 }
 
 pre_remove() {
+  # First: the guard watches /etc/sddm.conf.d, so cleaning up below would run it,
+  # and it would put back the PAM line that is about to go.
+  systemctl disable --now omarchy-mu-sddm-guard.path omarchy-mu-sddm-sync.path omarchy-mu-apply-lock.path >/dev/null 2>&1 || true
+  systemctl stop omarchy-mu-sddm-guard.service >/dev/null 2>&1 || true
   _restore_lock_screens
   systemctl disable --now omarchy-mu-update-log.path >/dev/null 2>&1 || true
   rm -f /usr/share/sddm/themes/omarchy-multiuser/theme.conf.user
