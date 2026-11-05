@@ -88,6 +88,27 @@ test_removing_the_package_stops_the_guard_before_cleaning_up() {
   [[ -n $stop && -n $clean && $stop -lt $clean ]] || fail "the guard would put the PAM line back"
 }
 
+test_removing_the_package_leaves_no_migration_watcher_behind() {
+  wants=$T/wants
+  mkdir -p "$wants"
+  ln -s /dev/null "$wants/omarchy-mu-migrate-record@ana.path"
+  ln -s /dev/null "$wants/omarchy-mu-migrate-record@bob.path"
+  ln -s /dev/null "$wants/other.path"
+  # systemctl gets to ana's and fails on bob's, whose link has to go anyway.
+  systemctl() {
+    echo "$*" >>"$T/calls"
+    [[ $3 == *@ana.path ]] && rm -f "$wants/$3"
+    [[ $3 == *@ana.path ]]
+  }
+  # shellcheck source=/dev/null  # only defines functions
+  source "$REPO/packaging/omarchy-multiuser.install"
+  _disable_migration_watchers "$wants"
+  assert_eq "$(ls "$wants")" "other.path"
+  assert_contains "$T/calls" "disable --now omarchy-mu-migrate-record@ana.path"
+  assert_contains "$T/calls" "disable --now omarchy-mu-migrate-record@bob.path"
+  grep -q '^  _disable_migration_watchers$' "$REPO/packaging/omarchy-multiuser.install" || fail "pre_remove doesn't call it"
+}
+
 test_guard_reports_wrong_theme() {
   setup_themes
   printf '[Theme]\nCurrent=omarchy\n' >"$T/etc/sddm.conf.d/10-theme.conf"

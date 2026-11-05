@@ -21,7 +21,8 @@ users on the login screen. See "Coming from an earlier version" in the README.
 - Logging out a desktop opened by the disk prompt, when removing an account or taking
   its rights, brings the login screen back: SDDM shows nothing there after a forced end.
 - Greeter: typing and the F keys work again after going to another console and back.
-- Removing the package turns off its path units first, which kept the PAM line in place.
+- Removing the package turns off its path units first, which kept the PAM line in place,
+  and leaves no dangling link to the migration watchers.
 - Depends on `perl`, no longer on `gettext`.
 
 Also from Omarchy PRs #16100 and #16920, and the session-switching findings posted there.

@@ -54,6 +54,15 @@ _restore_lock_screens() {
   done < <(getent passwd)
 }
 
+# systemd keeps these links after their unit file is gone, each one dangling.
+_disable_migration_watchers() {
+  local wants=${1:-/etc/systemd/system/multi-user.target.wants} link
+  for link in "$wants"/omarchy-mu-migrate-record@*.path; do
+    [[ -L $link ]] || continue
+    systemctl disable --now "${link##*/}" >/dev/null 2>&1 || rm -f -- "$link"
+  done
+}
+
 pre_remove() {
   # First: the guard watches /etc/sddm.conf.d, so cleaning up below would run it,
   # and it would put back the PAM line that is about to go.
@@ -61,6 +70,7 @@ pre_remove() {
   systemctl stop omarchy-mu-sddm-guard.service >/dev/null 2>&1 || true
   _restore_lock_screens
   systemctl disable --now omarchy-mu-update-log.path >/dev/null 2>&1 || true
+  _disable_migration_watchers
   rm -f /usr/share/sddm/themes/omarchy-multiuser/theme.conf.user
   systemctl --global disable omarchy-mu-login.service >/dev/null 2>&1 || true
   rm -f /etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf
