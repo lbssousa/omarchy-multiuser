@@ -1,0 +1,70 @@
+#!/bin/bash -p
+
+# omarchy:summary=Let the login screen open, once, the desktop of whoever unlocked the disk, from SDDM's PAM stack
+# omarchy:hidden=true
+#
+# SDDM's own automatic login puts the desktop on the first console, which SDDM 0.21
+# then needs for every later login screen: switching users meant logging out first.
+# A desktop opened from the login screen gets a console of its own. So, instead,
+# omarchy-mu-login-select leaves a one-time pass for whoever unlocked the disk
+# ($OMU_LOGIN_TICKET) and names them SDDM's last user, and the greeter, as it comes
+# up, logs that user in with an empty password, which this lets through.
+#
+# Two lines, first in SDDM's auth stack (omarchy-mu-sddm-guard puts them there):
+#
+#   [success=done default=ignore] ... omarchy-mu-login-once
+#       succeeds for an empty password, the pass naming this user, this boot and the
+#       last $OMU_LOGIN_TICKET_TTL seconds. The pass is taken by the first empty
+#       password, right or wrong, so it opens one login at most.
+#   [success=die default=ignore] ... omarchy-mu-login-once --empty
+#       succeeds, ending the attempt, for any other empty password: the greeter's
+#       try at a start with no pass costs neither pam_unix's delay nor a
+#       failed-login strike.
+#
+# A password typed at the login screen is never empty, and both lines leave it to
+# the rest of the stack. success=done skips system-login's pam_shells and
+# pam_nologin, so their checks are made here; pam_env runs again at session.
+
+set -uo pipefail
+set +x
+[[ -n ${OMU_ROOT:-} ]] || export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
+umask 077
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh" || exit 1
+
+(( EUID == 0 )) || [[ -n $OMU_ROOT ]] || exit 1
+[[ ${PAM_TYPE:-} == auth ]] || exit 1
+user=${PAM_USER:-}
+[[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || exit 1
+
+# pam_exec's expose_authtok writes the password's bytes and closes the pipe: an
+# empty password is nothing at all (a NUL after it, as other versions write, is
+# taken off too).
+password=""
+IFS= read -r -d '' password || true
+[[ -z $password ]] || exit 1
+
+[[ ${1:-} != --empty ]] || exit 0
+
+# Root's own file, not a link: in production only root writes the directory.
+ticket=$OMU_LOGIN_TICKET
+[[ -f $ticket && ! -L $ticket && -O $ticket ]] || exit 1
+taken=$ticket.taken.$$
+mv -f -- "$ticket" "$taken" 2>/dev/null || exit 1
+read -r ticket_user ticket_boot ticket_time _ <"$taken" || true
+rm -f -- "$taken"
+
+[[ $ticket_user == "$user" ]] || exit 1
+boot=$(<"$OMU_BOOT_ID") || exit 1
+[[ -n $boot && $ticket_boot == "$boot" ]] || exit 1
+[[ $ticket_time =~ ^[0-9]+$ ]] || exit 1
+now=$(date +%s)
+(( now >= ticket_time && now - ticket_time <= OMU_LOGIN_TICKET_TTL )) || exit 1
+
+# pam_nologin and pam_shells, as system-login would have.
+[[ ! -e $OMU_ROOT/etc/nologin && ! -e $OMU_ROOT/run/nologin ]] || exit 1
+shell=$(getent passwd "$user" | cut -d: -f7)
+[[ -n $shell ]] && grep -qxF -- "$shell" "$OMU_ROOT/etc/shells" || exit 1
+
+exit 0

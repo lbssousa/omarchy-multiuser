@@ -79,7 +79,8 @@ pre_remove() {
   rm -f /usr/share/sddm/themes/omarchy-multiuser/theme.conf.user
   systemctl --global disable omarchy-mu-login.service omarchy-mu-menu-sync.path >/dev/null 2>&1 || true
   rm -f /etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf
-  [[ ! -f /etc/pam.d/sddm ]] || sed -i '/\/usr\/bin\/omarchy-mu-login-match/d' /etc/pam.d/sddm
+  [[ ! -f /etc/pam.d/sddm ]] || sed -i '/\/usr\/bin\/omarchy-mu-login-\(match\|once\)/d' /etc/pam.d/sddm
+  rm -f /run/omarchy-multiuser/login-once
 }
 
 post_remove() {
