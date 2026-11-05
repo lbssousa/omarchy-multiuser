@@ -15,6 +15,14 @@ function candidates(lastUser, names) {
   return list
 }
 
+// The account the greeter logs in by itself as it comes up: SDDM's last user,
+// which omarchy-mu-login-select sets to whoever unlocked the disk. Only a plain
+// account name; anything else, nobody.
+function autoLoginUser(lastUser) {
+  var name = String(lastUser || "")
+  return /^[a-z_][a-z0-9_-]{0,31}$/.test(name) ? name : ""
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { candidates: candidates }
+  module.exports = { candidates: candidates, autoLoginUser: autoLoginUser }
 }

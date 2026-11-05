@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Switching users no longer asks the person the disk prompt logged in to log out
+  first.** SDDM's own automatic login put that desktop on the first console, where
+  SDDM 0.21 then fails to show any later login screen. `omarchy-mu-login-select` now
+  leaves a one-time pass instead (`/run/omarchy-multiuser/login-once`: the user, this
+  boot, the time) and makes them SDDM's last user; the greeter logs them in as it comes
+  up, and `omarchy-mu-login-once`, first in SDDM's PAM stack, lets that one login
+  through: an empty password, their name, this boot, the last minute, the pass taken
+  by the first try. The desktop gets a console of its own, as at the login screen.
+  `omarchy-mu-sddm-guard` keeps its two PAM lines right before
+  `omarchy-mu-login-match`. Another SDDM theme makes no try and shows the login screen.
+
 ## 0.12.0 (2026-11-10)
 
 Closer to Omarchy PR #16920.

@@ -16,7 +16,17 @@ OMU_FIDO2_AUTHFILE=${OMU_FIDO2_AUTHFILE:-$OMU_ROOT/etc/fido2/fido2}
 OMU_FPRINT_DIR=${OMU_FPRINT_DIR:-$OMU_ROOT/var/lib/fprint}
 OMU_PAM_DIR=${OMU_PAM_DIR:-$OMU_ROOT/etc/pam.d}
 OMU_SDDM_CONF_DIR=${OMU_SDDM_CONF_DIR:-$OMU_ROOT/etc/sddm.conf.d}
+# Where omarchy-mu-login-select named whoever unlocked the disk, up to 0.11.0.
+# Removed at every SDDM start, for machines upgraded from then.
 OMU_SDDM_AUTOLOGIN=${OMU_SDDM_AUTOLOGIN:-$OMU_SDDM_CONF_DIR/zzz-omarchy-mu-autologin.conf}
+# SDDM's own record of the last login, which the greeter reads as lastUser.
+OMU_SDDM_STATE=${OMU_SDDM_STATE:-$OMU_ROOT/var/lib/sddm/state.conf}
+# The one-time pass omarchy-mu-login-select leaves for whoever unlocked the
+# disk, and omarchy-mu-login-once takes at the login screen: "user boot-id
+# seconds". Root's alone, in a directory only root writes.
+OMU_LOGIN_TICKET=${OMU_LOGIN_TICKET:-$OMU_ROOT/run/omarchy-multiuser/login-once}
+OMU_LOGIN_TICKET_TTL=${OMU_LOGIN_TICKET_TTL:-60}
+OMU_BOOT_ID=${OMU_BOOT_ID:-$OMU_ROOT/proc/sys/kernel/random/boot_id}
 OMU_SDDM_THEMES=${OMU_SDDM_THEMES:-$OMU_ROOT/usr/share/sddm/themes}
 OMU_STATE_DIR=${OMU_STATE_DIR:-$OMU_ROOT/var/lib/omarchy-multiuser}
 OMU_LOCK_DIR=${OMU_LOCK_DIR:-$OMU_ROOT/run/lock}

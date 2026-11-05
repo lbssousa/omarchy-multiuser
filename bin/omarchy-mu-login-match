@@ -30,7 +30,8 @@ source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/slots.sh" || e
 user=${PAM_USER:-}
 [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || exit 1
 
-# pam_exec's expose_authtok hands over the password ending in a NUL.
+# pam_exec's expose_authtok writes the password's bytes, with or without a NUL after
+# them depending on the version.
 password=""
 IFS= read -r -d '' password || [[ -n $password ]] || exit 1
 
