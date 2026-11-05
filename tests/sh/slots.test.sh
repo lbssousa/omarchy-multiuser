@@ -20,6 +20,7 @@ setup() {
   export OMU_REFUSAL_DELAY=0 OMU_LUKS_PBKDF="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
   export OMU_REBUILD_BOOT=$T/stubs/rebuild OMU_LIFECYCLE_DISPATCH=$T/stubs/dispatch OMU_STATE_DIR=$T/state
   mkdir -p "$T/state" "$T/etc/sddm.conf.d"
+  setup_sddm_state
   printf 'root:x:0:0::/root:/bin/bash\nowner:x:1000:1000:Owner:/home/owner:/bin/bash\nbob:x:1001:1001:Bob:/home/bob:/bin/bash\nsddm:x:900:900::/var/lib/sddm:/usr/bin/nologin\n' >"$T/etc/passwd"
   printf 'wheel:x:998:owner\nomarchy-users:x:950:bob\n' >"$T/etc/group"
   {
@@ -256,7 +257,25 @@ test_a_locked_root_stays_locked() {
 
 # --- omarchy-mu-login-select ------------------------------------------------------
 
-autologin_file() { echo "$T/etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf"; }
+old_autologin_file() { echo "$T/etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf"; }
+ticket() { echo "$T/run/omarchy-multiuser/login-once"; }
+state() { echo "$T/var/lib/sddm/state.conf"; }
+# A pass for $1 at this boot, and $1 as SDDM's last user.
+assert_logged_in() {
+  assert_file "$(ticket)"
+  read -r user boot when <"$(ticket)"
+  assert_eq "$user" "$1" "ticket's user"
+  assert_eq "$boot" "$(<"$T/proc/sys/kernel/random/boot_id")" "ticket's boot"
+  [[ $when =~ ^[0-9]+$ ]] || fail "ticket's time: $when"
+  assert_eq "$(stat -c %a "$(ticket)")" 600 "ticket's mode"
+  assert_contains "$(state)" "User=$1"
+  assert_no_file "$(old_autologin_file)"
+}
+assert_login_screen() { assert_no_file "$(ticket)"; assert_no_file "$(old_autologin_file)"; }
+setup_sddm_state() {
+  mkdir -p "$T/proc/sys/kernel/random" "$T/var/lib/sddm"
+  echo 11111111-2222-3333-4444-555555555555 >"$T/proc/sys/kernel/random/boot_id"
+}
 record() { mkdir -p "$T/run/omarchy-multiuser"; printf '%s %s\n' "$1" "$2" >"$T/run/omarchy-multiuser/luks-slot"; }
 select_login() { omarchy-mu-login-select --clear && omarchy-mu-login-select; }
 
@@ -265,8 +284,7 @@ test_the_slot_that_opened_the_disk_opens_its_owners_desktop() {
   give_bob_a_password
   record "$UUID" 1
   select_login || fail "select"
-  assert_contains "$(autologin_file)" "User=bob"
-  assert_contains "$(autologin_file)" "Relogin=false"
+  assert_logged_in bob
 }
 
 test_the_record_is_used_once() {
@@ -274,9 +292,9 @@ test_the_record_is_used_once() {
   give_bob_a_password
   record "$UUID" 1
   select_login
-  assert_file "$(autologin_file)"
+  assert_logged_in bob
   select_login || fail "second start"
-  assert_no_file "$(autologin_file)"
+  assert_login_screen
 }
 
 test_anything_unsure_shows_the_login_screen() {
@@ -285,11 +303,11 @@ test_anything_unsure_shows_the_login_screen() {
   for bad in "$UUID 9" "other-disk 1" "$UUID x"; do
     read -r a b <<<"$bad"; record "$a" "$b"
     select_login
-    assert_no_file "$(autologin_file)"
+    assert_login_screen
   done
   rm -f "$T/run/omarchy-multiuser/luks-slot"
   select_login
-  assert_no_file "$(autologin_file)"
+  assert_login_screen
 }
 
 test_a_password_changed_with_passwd_shows_the_login_screen() {
@@ -298,7 +316,7 @@ test_a_password_changed_with_passwd_shows_the_login_screen() {
   printf 'bob:changed-elsewhere\n' | "$T/stubs/chpasswd"
   record "$UUID" 1
   select_login
-  assert_no_file "$(autologin_file)"
+  assert_login_screen
 }
 
 test_an_unfinished_change_shows_the_login_screen() {
@@ -307,7 +325,7 @@ test_an_unfinished_change_shows_the_login_screen() {
   printf 'user=bob\nuuid=%s\nphase=key\n' "$UUID" >"$T/state/password-journal"
   record "$UUID" 1
   select_login
-  assert_no_file "$(autologin_file)"
+  assert_login_screen
 }
 
 test_a_broken_map_shows_the_login_screen() {
@@ -316,14 +334,14 @@ test_a_broken_map_shows_the_login_screen() {
   printf '%s 0 1000 bob fp\n' "$UUID" >>"$map"
   record "$UUID" 1
   select_login
-  assert_no_file "$(autologin_file)"
+  assert_login_screen
 }
 
 test_one_account_on_an_encrypted_disk_is_logged_in() {
   setup
   sed -i '/^bob:/d' "$T/etc/passwd"
   select_login
-  assert_contains "$(autologin_file)" "User=owner"
+  assert_logged_in owner
 }
 
 # What systemd-cryptenroll writes, without a TPM behind it.
@@ -336,7 +354,7 @@ test_one_account_on_a_disk_a_token_opens_gets_the_login_screen() {
     cryptsetup token remove --token-id 0 "$T/disk" 2>/dev/null
     printf '%s' "$token" | cryptsetup token import --token-id 0 "$T/disk" >/dev/null || fail "no token"
     select_login
-    assert_no_file "$(autologin_file)"
+    assert_login_screen
   done
 }
 
@@ -346,7 +364,7 @@ test_a_token_leaves_the_slot_on_record_to_choose() {
   printf '%s' "$TPM2_TOKEN" | cryptsetup token import "$T/disk" >/dev/null || fail "no token"
   record "$UUID" 1
   select_login || fail "select"
-  assert_contains "$(autologin_file)" "User=bob"
+  assert_logged_in bob
 }
 
 test_an_unencrypted_machine_is_never_logged_in() {
@@ -354,16 +372,17 @@ test_an_unencrypted_machine_is_never_logged_in() {
   sed -i '/^bob:/d' "$T/etc/passwd"
   export OMU_SYSTEM_DRIVE=
   select_login
-  assert_no_file "$(autologin_file)"
+  assert_login_screen
 }
 
 test_clear_takes_every_automatic_login_away() {
   setup
   printf '[Autologin]\nUser=owner\n' >"$T/etc/sddm.conf.d/autologin.conf"
-  printf '[Autologin]\nUser=owner\n' >"$(autologin_file)"
+  printf '[Autologin]\nUser=owner\n' >"$(old_autologin_file)"
+  mkdir -p "$T/run/omarchy-multiuser"; echo "owner x 1" >"$(ticket)"
   omarchy-mu-login-select --clear || fail "clear"
   assert_no_file "$T/etc/sddm.conf.d/autologin.conf"
-  assert_no_file "$(autologin_file)"
+  assert_login_screen
 }
 
 test_sddm_conf_naming_someone_stops_sddm_with_two_people_only() {
@@ -372,6 +391,43 @@ test_sddm_conf_naming_someone_stops_sddm_with_two_people_only() {
   omarchy-mu-login-select --clear 2>/dev/null && fail "started SDDM into someone's desktop"
   sed -i '/^bob:/d' "$T/etc/passwd"
   omarchy-mu-login-select --clear || fail "stopped SDDM on a one-person machine"
+}
+
+test_the_last_user_is_set_and_the_rest_of_sddms_state_kept() {
+  setup
+  give_bob_a_password
+  printf '[Last]\n# The last user\nUser=owner\nSession=/usr/share/wayland-sessions/hyprland.desktop\n\n[Other]\nUser=keep\n' >"$(state)"
+  chmod 640 "$(state)"
+  record "$UUID" 1
+  select_login || fail "select"
+  assert_logged_in bob
+  assert_eq "$(grep -c '^User=' "$(state)")" 2
+  assert_contains "$(state)" "Session=/usr/share/wayland-sessions/hyprland.desktop"
+  assert_contains "$(state)" "User=keep"
+  assert_not_contains "$(state)" "User=owner"
+  assert_eq "$(stat -c %a "$(state)")" 640 "state.conf's mode"
+}
+
+test_a_state_without_a_last_section_gets_one() {
+  setup
+  sed -i '/^bob:/d' "$T/etc/passwd"
+  printf '[Other]\nKey=1\n' >"$(state)"
+  select_login
+  assert_logged_in owner
+  assert_contains "$(state)" "[Last]"
+  assert_contains "$(state)" "Key=1"
+}
+
+test_without_a_boot_id_or_sddms_state_dir_it_shows_the_login_screen() {
+  setup
+  sed -i '/^bob:/d' "$T/etc/passwd"
+  rm "$T/proc/sys/kernel/random/boot_id"
+  select_login
+  assert_login_screen
+  setup_sddm_state
+  rm -rf "$T/var/lib/sddm"
+  select_login
+  assert_login_screen
 }
 
 # --- omarchy-mu-login-match -------------------------------------------------------

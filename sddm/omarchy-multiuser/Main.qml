@@ -11,6 +11,9 @@ import "Power.js" as Power
 // a password alone, as at the disk prompt, tried for the last account and then each
 // other one until one logs in (Password.js, omarchy-mu-login-match). The power
 // actions SDDM offers sit at the bottom, by click or F key (Power.js).
+// As it comes up, it logs in by itself whoever unlocked the disk at this boot, which
+// omarchy-mu-login-select chose and omarchy-mu-login-once lets through once: that
+// desktop gets a console of its own, so switching users needs no logout.
 Rectangle {
   id: root
   width: 640
@@ -38,6 +41,10 @@ Rectangle {
   // even if it arrives after the next account was sent, so it is never taken for
   // that account's answer.
   property int duplicates: 0
+  // The greeter's own try, as it comes up, at the login omarchy-mu-login-select
+  // chose (omarchy-mu-login-once), and an Enter pressed meanwhile.
+  property bool autoAttempt: false
+  property bool loginQueued: false
   readonly property var powerActions: Power.available(powerCaps)
   // All false until the daemon tells SDDM what the machine can do.
   readonly property var powerCaps: ({
@@ -89,6 +96,29 @@ Rectangle {
     awaiting = true
     sddm.login(attemptUsers[attempt], pending, root.sessionIndex)
     unanswered.restart()
+  }
+
+  // An empty password for SDDM's last user. omarchy-mu-login-select left a pass for
+  // it if the disk was unlocked with that user's password at this boot; without one,
+  // PAM turns it down at once, and nothing shows.
+  function tryAutoLogin() {
+    var user = Password.autoLoginUser(userModel.lastUser)
+    if (user === "")
+      return
+    autoAttempt = true
+    awaiting = true
+    sddm.login(user, "", root.sessionIndex)
+    unanswered.restart()
+  }
+
+  function endAutoLogin() {
+    autoAttempt = false
+    awaiting = false
+    unanswered.stop()
+    if (loginQueued) {
+      loginQueued = false
+      queuedLogin.start()
+    }
   }
 
   function requestPower(action) {
@@ -153,6 +183,10 @@ Rectangle {
         return
       root.awaiting = false
       unanswered.stop()
+      if (root.autoAttempt) {
+        root.endAutoLogin()
+        return
+      }
       if (root.pending !== "" && root.attempt + 1 < root.attemptUsers.length) {
         root.attempt++
         root.resends = 0
@@ -162,6 +196,7 @@ Rectangle {
       root.failLogin()
     }
     function onLoginSucceeded() {
+      root.autoAttempt = false
       root.awaiting = false
       unanswered.stop()
       root.pending = ""
@@ -182,6 +217,10 @@ Rectangle {
     id: unanswered
     interval: 5000
     onTriggered: {
+      if (root.autoAttempt) {
+        root.endAutoLogin()
+        return
+      }
       if (root.pending === "")
         return
       if (root.resends >= 3) {
@@ -191,6 +230,13 @@ Rectangle {
       root.resends++
       root.send()
     }
+  }
+
+  // As nextAttempt: SDDM drops a login sent before the last one's helper is gone.
+  Timer {
+    id: queuedLogin
+    interval: 300
+    onTriggered: root.login()
   }
 
   Timer {
@@ -314,6 +360,8 @@ Rectangle {
           if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
             if (root.pending === "" && !root.awaiting)
               root.login()
+            else if (root.autoAttempt)
+              root.loginQueued = true
             event.accepted = true
           }
         }
@@ -406,5 +454,8 @@ Rectangle {
   }
   Window.onActiveFocusItemChanged: Qt.callLater(restorePasswordFocus)
 
-  Component.onCompleted: password.input.forceActiveFocus()
+  Component.onCompleted: {
+    password.input.forceActiveFocus()
+    tryAutoLogin()
+  }
 }
