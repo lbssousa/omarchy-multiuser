@@ -1,0 +1,6 @@
+[Unit]
+Description=Write the multi-user menu entries in the Omarchy language (omarchy-multiuser)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-mu-menu-sync

@@ -164,6 +164,12 @@ own home, such as web apps, TUIs and mise dev envs, stays), and
 **Update › Channel, Firmware, Timezone, Time**, *Config › Plymouth* and
 *Hardware › Trackpad*.
 
+The entries this package adds (**System › Switch User** and *Setup › Users*) are
+written in the language Omarchy shows, from `share/menu-labels.json`, which has
+every language Omarchy has. The menu translates only its own rows, so
+`omarchy-mu-menu-sync` writes the labels at each login, and again when the language
+changes (`omarchy-mu-menu-sync.path`); the English label stays a search term.
+
 The bar's update icon (`omarchy.system-update`), whose click runs
 `omarchy-update`, comes off their bar at their first login
 (`omarchy-mu-update-widget-sync`, run by `omarchy-mu-login`); put back by

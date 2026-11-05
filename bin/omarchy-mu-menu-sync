@@ -11,6 +11,13 @@
 # so instead of seeding it, omarchy-mu-menu-sync.service (enabled globally)
 # runs this at every login: new users get the block on their first one.
 #
+# The menu translates only its own rows (default/i18n/<code>/menu.json), never
+# an extension's, so the block's labels are written here in the language
+# Omarchy shows (~/.config/omarchy/language, as omarchy-i18n reads it), from
+# share/menu-labels.json, with the English label kept as a search term the way
+# the menu keeps it for its own rows. A language it lacks, or none, is English.
+# omarchy-mu-menu-sync.path runs this again when the language changes.
+#
 # Usage: omarchy-mu-menu-sync [file]
 
 set -euo pipefail
@@ -25,6 +32,37 @@ end='// <<< omarchy-multiuser'
 
 [[ -f $block ]] || omu_die "Missing $block"
 
+language_file=${OMARCHY_LANGUAGE_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/language}
+language=en
+if [[ -f $language_file ]]; then
+  read -r language <"$language_file" || true
+  language=${language//[[:space:]]/}
+  [[ $language =~ ^[a-z]{2,3}(-[A-Za-z]{2})?$ ]] || language=en
+fi
+
+translated=$(mktemp)
+trap 'rm -f "$translated"' EXIT
+# shellcheck disable=SC2016  # Perl, not shell
+perl -CSD -MJSON::PP -e '
+  my ($catalog_file, $language) = @ARGV;
+  my $labels = {};
+  if (open my $fh, "<:encoding(UTF-8)", $catalog_file) {
+    local $/;
+    my $catalog = eval { JSON::PP->new->decode(<$fh>) } || {};
+    $labels = $catalog->{$language} if ref $catalog->{$language} eq "HASH";
+  }
+  my $json = JSON::PP->new->allow_nonref;
+  while (my $line = <STDIN>) {
+    if ($line =~ /^\s*"([^"]+)":\s*\{/ && defined(my $label = $labels->{$1})) {
+      $line =~ s{"label":("(?:[^"\\]|\\.)*")}{
+        my $english = $1;
+        $label eq $json->decode($english) ? "\"label\":$english"
+          : "\"label\":" . $json->encode($label) . ",\"searchTerms\":[$english]"
+      }e;
+    }
+    print $line;
+  }' "$OMU_SHARE/menu-labels.json" "$language" <"$block" >"$translated"
+
 if [[ ! -f $file ]]; then
   mkdir -p "$(dirname "$file")"
   if [[ -f /etc/skel/.config/omarchy/extensions/omarchy-menu.jsonc ]]; then
@@ -34,7 +72,7 @@ if [[ ! -f $file ]]; then
   fi
 fi
 
-new=$(awk -v begin="$begin" -v end="$end" -v blockfile="$block" '
+new=$(awk -v begin="$begin" -v end="$end" -v blockfile="$translated" '
   function out(line) { result[++n] = line }
   function emit_block(   line, j) {
     # The entry before the block needs its comma, or the JSON breaks.

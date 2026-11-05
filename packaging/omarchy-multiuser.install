@@ -39,6 +39,11 @@ post_upgrade() {
     /usr/bin/omarchy-mu-sddm-guard || true
     _warn_passwords
   fi
+  # The menu entries follow the language from here on; enabling the login unit
+  # brings the watcher along (Also=), but one enabled before needs it now.
+  if (( $(vercmp "$2" 0.11.0) < 0 )) && systemctl --global is-enabled --quiet omarchy-mu-login.service 2>/dev/null; then
+    systemctl --global enable omarchy-mu-menu-sync.path >/dev/null 2>&1 || true
+  fi
 }
 
 # Each user's shell runs the lock screen from this package; with it gone and
@@ -72,7 +77,7 @@ pre_remove() {
   systemctl disable --now omarchy-mu-update-log.path >/dev/null 2>&1 || true
   _disable_migration_watchers
   rm -f /usr/share/sddm/themes/omarchy-multiuser/theme.conf.user
-  systemctl --global disable omarchy-mu-login.service >/dev/null 2>&1 || true
+  systemctl --global disable omarchy-mu-login.service omarchy-mu-menu-sync.path >/dev/null 2>&1 || true
   rm -f /etc/sddm.conf.d/zzz-omarchy-mu-autologin.conf
   [[ ! -f /etc/pam.d/sddm ]] || sed -i '/\/usr\/bin\/omarchy-mu-login-match/d' /etc/pam.d/sddm
 }

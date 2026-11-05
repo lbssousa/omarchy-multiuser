@@ -55,7 +55,7 @@ package() {
   install -Dm644 -t "$pkgdir/usr/lib/tmpfiles.d" tmpfiles.d/omarchy-multiuser.conf
   install -Dm644 -t "$pkgdir/usr/lib/systemd/system" systemd/system/*
   install -Dm644 -t "$pkgdir/usr/lib/systemd/system/sddm.service.d" systemd/sddm.service.d/*.conf
-  install -Dm644 -t "$pkgdir/usr/lib/systemd/user" systemd/user/*.service
+  install -Dm644 -t "$pkgdir/usr/lib/systemd/user" systemd/user/*.{service,path}
   install -Dm644 -t "$pkgdir/usr/lib/systemd/user/omarchy-migrate-notify.service.d" \
     systemd/user/omarchy-migrate-notify.service.d/*.conf
   install -Dm644 -t "$pkgdir/usr/share/libalpm/hooks" libalpm/hooks/*.hook
