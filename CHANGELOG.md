@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 (2026-11-05)
 
 - Menu: **System › Switch User** and *Setup › Users*' entries are written in the
   language Omarchy shows, in all of its languages, with the English label kept for
