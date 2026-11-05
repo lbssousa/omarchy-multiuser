@@ -95,6 +95,7 @@ test_removing_the_package_leaves_no_migration_watcher_behind() {
   ln -s /dev/null "$wants/omarchy-mu-migrate-record@bob.path"
   ln -s /dev/null "$wants/other.path"
   # systemctl gets to ana's and fails on bob's, whose link has to go anyway.
+  # shellcheck disable=SC2329  # called by the install script
   systemctl() {
     echo "$*" >>"$T/calls"
     [[ $3 == *@ana.path ]] && rm -f "$wants/$3"
