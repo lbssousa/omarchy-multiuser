@@ -15,6 +15,7 @@ OMU_FIDO2_AUTHFILE=${OMU_FIDO2_AUTHFILE:-$OMU_ROOT/etc/fido2/fido2}
 OMU_FPRINT_DIR=${OMU_FPRINT_DIR:-$OMU_ROOT/var/lib/fprint}
 OMU_PAM_DIR=${OMU_PAM_DIR:-$OMU_ROOT/etc/pam.d}
 OMU_SDDM_CONF_DIR=${OMU_SDDM_CONF_DIR:-$OMU_ROOT/etc/sddm.conf.d}
+OMU_SDDM_AUTOLOGIN=${OMU_SDDM_AUTOLOGIN:-$OMU_SDDM_CONF_DIR/zzz-omarchy-mu-autologin.conf}
 OMU_SDDM_THEMES=${OMU_SDDM_THEMES:-$OMU_ROOT/usr/share/sddm/themes}
 OMU_STATE_DIR=${OMU_STATE_DIR:-$OMU_ROOT/var/lib/omarchy-multiuser}
 OMU_LOCK_DIR=${OMU_LOCK_DIR:-$OMU_ROOT/run/lock}
@@ -106,6 +107,18 @@ omu_fixed_autologin() {
   awk '/^\[/ { section = $0 }
     section == "[Autologin]" && /^[ \t]*User[ \t]*=[ \t]*[^ \t]/ { found = 1 }
     END { exit !found }' "$OMU_ROOT/etc/sddm.conf"
+}
+
+# omu_ask_new_password <header> — prints the password, asked twice until both match.
+omu_ask_new_password() {
+  local first second
+  while :; do
+    first=$(gum input --password --header "$1") || return 1
+    second=$(gum input --password --header "$1, again") || return 1
+    [[ $first != "$second" ]] || break
+    echo "The passwords don't match." >&2
+  done
+  printf '%s' "$first"
 }
 
 # omu_atomic_write <dest> <mode> — stdin to a sibling temp file, then rename,

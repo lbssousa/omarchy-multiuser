@@ -7,7 +7,7 @@ default:
 test: test-js test-sh lint greeter-smoke
     visudo -cf etc/sudoers.d/omarchy-multiuser
 
-# The greeter's pure helpers (UserList.js, Strings.js).
+# The greeter's pure helpers (Password.js, Strings.js).
 test-js:
     node --test tests/js/
 

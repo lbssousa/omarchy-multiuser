@@ -14,9 +14,8 @@ test("language from locale names", () => {
 })
 
 test("translations", () => {
-  assert.equal(S.t("pt_BR", "otherUser"), "Outro usuário…")
-  assert.equal(S.t("en_US", "otherUser"), "Other user…")
-  assert.equal(S.t("pt_BR", "username"), "Nome de usuário")
-  assert.equal(S.t("C", "username"), "Username")
+  assert.equal(S.t("pt_BR", "reboot"), "Reiniciar")
+  assert.equal(S.t("en_US", "reboot"), "Reboot")
+  assert.equal(S.t("C", "cancel"), "Cancel")
   assert.equal(S.t("pt_BR", "missing"), "missing")
 })

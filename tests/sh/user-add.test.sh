@@ -19,106 +19,51 @@ setup() {
 
 shadow_of() { awk -F: -v u="$1" '$1 == u { print $2 ":" $3 }' "$T/etc/shadow"; }
 
-test_a_new_account_chooses_its_password_at_the_login_screen() {
+test_the_password_goes_in_after_everything_else() {
   setup
   omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_eq "$(shadow_of bob)" ":0"
-  assert_contains "$T/calls" "passwd -d -e bob"
-  assert_contains "$T/out" "first login"
-  assert_contains "$T/usr/share/sddm/themes/omarchy-multiuser/theme.conf.user" "passwordChangeUsers=bob"
+  assert_eq "$(grep -E '^(useradd|runuser|omarchy-mu-user-helper) ' "$T/calls" | cut -d' ' -f1,2 | paste -sd,)" \
+    "omarchy-mu-user-helper check-new,useradd --create-home,runuser -u,omarchy-mu-user-helper password"
+  assert_contains "$T/calls" "omarchy-mu-user-helper password bob"
+  # check-new's one password, then the caller's and the new one.
+  assert_eq "$(cat "$T/helper-stdin")" $'sekret-pw\nsekret-pw\nsekret-pw'
 }
 
-test_the_account_opens_after_everything_else() {
+test_a_password_someone_else_has_stops_before_anything_changes() {
   setup
-  omarchy-mu-user-add bob --full-name "Bob B" --luks >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_eq "$(grep -nE '^(runuser|omarchy-mu-luks-enroll|passwd) ' "$T/calls" | cut -d' ' -f1 | cut -d: -f2 | paste -sd' ')" \
-    "runuser omarchy-mu-luks-enroll passwd"
+  echo check-new >"$T/helper-fails"
+  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 && fail "added bob"
+  assert_not_contains "$T/calls" useradd
+  assert_not_contains "$T/calls" usermod
 }
 
-test_set_password_asks_for_it_now() {
+test_passwords_are_asked_until_they_match() {
   setup
-  omarchy-mu-user-add bob --full-name "Bob B" --set-password >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_contains "$T/calls" "passwd bob"
-  assert_not_contains "$T/calls" "passwd -d"
-  assert_eq "$(shadow_of bob)" "!:20000"
+  printf 'one-pass\ntwo-pass\ngood-pass\ngood-pass\nmine-pass\n' >"$T/gum-answers"
+  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_contains "$T/out" "don't match"
+  assert_eq "$(cat "$T/helper-stdin")" $'good-pass\nmine-pass\ngood-pass'
 }
 
-test_interactive_answer_keeps_the_old_way() {
+test_a_password_that_fails_last_says_how_to_finish() {
   setup
-  printf 'n\nn\nn\n' >"$T/gum-answers"
-  cat >"$T/stubs/gum" <<'STUB'
-#!/bin/bash
-if [[ $1 == input ]]; then
-  case $* in *username*) echo bob ;; *"Full name"*) echo "Bob B" ;; esac
-  exit 0
-fi
-answer=$(head -1 "$T/gum-answers"); sed -i 1d "$T/gum-answers"
-[[ $answer == y ]]
-STUB
+  echo password >"$T/helper-fails"
+  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 && fail "said it worked"
+  assert_contains "$T/out" "omarchy-mu-user-password bob"
+}
+
+test_interactive_asks_for_everything() {
+  setup
+  printf 'bob\nBob B\n\nn\n' >"$T/gum-answers"
   omarchy-mu-user-add >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_contains "$T/calls" "passwd bob"
-  assert_not_contains "$T/calls" "passwd -d"
+  assert_contains "$T/calls" "omarchy-mu-user-helper password bob"
 }
 
-test_english_prompts_fall_back_to_asking_now() {
+test_an_account_can_no_longer_wait_to_choose() {
   setup
-  printf 'LANG=en_US.UTF-8\n' >"$T/etc/locale.conf"
-  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_contains "$T/out" "this machine's language"
-  assert_contains "$T/calls" "passwd bob"
-  assert_not_contains "$T/calls" "passwd -d"
-  assert_eq "$(shadow_of bob)" "!:20000"
-}
-
-test_an_administrator_is_warned_about_first_come() {
-  setup
-  omarchy-mu-user-add bob --full-name "Bob B" --admin >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_contains "$T/out" "would get root"
-  assert_eq "$(shadow_of bob)" ":0"
-}
-
-test_first_login_never_replaces_a_password() {
-  setup
-  omarchy-mu-accounts first-login owner 2>"$T/err" && fail "emptied a password"
-  assert_contains "$T/err" "already has a password"
-  assert_not_contains "$T/calls" "passwd"
-  assert_eq "$(shadow_of owner)" '$6$owner:1'
-}
-
-test_first_login_refuses_system_accounts_and_strangers() {
-  setup
-  omarchy-mu-accounts first-login root 2>"$T/err" && fail "opened root"
-  omarchy-mu-accounts first-login nobody 2>"$T/err" && fail "opened an unknown account"
-  assert_not_contains "$T/calls" "passwd"
-}
-
-test_first_login_without_the_greeter_stays_locked() {
-  setup
-  printf 'bob:x:1001:1001::/home/bob:/bin/bash\n' >>"$T/etc/passwd"
-  printf 'bob:!:20000:0:99999:7:::\n' >>"$T/etc/shadow"
-  rm "$T/usr/share/sddm/themes/omarchy-multiuser/Main.qml"
-  omarchy-mu-accounts first-login bob 2>"$T/err" && fail "opened it with no greeter to ask"
-  assert_contains "$T/err" "isn't installed"
-  assert_eq "$(shadow_of bob)" "!:20000"
-}
-
-test_first_login_locks_again_when_passwd_goes_wrong() {
-  setup
-  printf 'bob:x:1001:1001::/home/bob:/bin/bash\n' >>"$T/etc/passwd"
-  # Empty but not expired: nothing would ask for a password.
-  printf 'bob::20000:0:99999:7:::\n' >>"$T/etc/shadow"
-  : >"$T/passwd-fails"
-  omarchy-mu-accounts first-login bob 2>"$T/err" && fail "reported success"
-  assert_contains "$T/err" "stays locked"
-  assert_eq "$(shadow_of bob)" "!:20000"
-}
-
-test_first_login_expires_an_empty_password() {
-  setup
-  printf 'bob:x:1001:1001::/home/bob:/bin/bash\n' >>"$T/etc/passwd"
-  printf 'bob::20000:0:99999:7:::\n' >>"$T/etc/shadow"
-  omarchy-mu-accounts first-login bob >/dev/null 2>&1 || fail "failed"
-  assert_eq "$(shadow_of bob)" ":0"
+  omarchy-mu-user-add bob --full-name "Bob B" --set-password 2>"$T/err" && fail "took an option that is gone"
+  omarchy-mu-accounts first-login bob 2>"$T/err" && fail "first-login is gone"
+  true
 }
 
 test_adds_an_account() {

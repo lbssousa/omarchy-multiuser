@@ -1,0 +1,64 @@
+#!/bin/bash
+
+# omarchy:summary=Choose whose desktop SDDM opens at this start
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# Runs as root before every SDDM start (sddm.service.d/omarchy-mu-login-select.conf).
+# --clear runs first and must succeed for SDDM to start: it takes away any automatic
+# login. The second run then names, in the last-sorting drop-in, the one account on
+# an encrypted disk or, with more than one, the account whose key slot unlocked the
+# disk this boot, used once. Anything it can't be sure of shows the login screen.
+#
+# Usage: omarchy-mu-login-select [--clear]
+
+set -uo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+# shellcheck source=../lib/omarchy-multiuser/slots.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/slots.sh"
+
+umask 022
+managed=$OMU_SDDM_AUTOLOGIN
+mapfile -t accounts < <(omu_human_users)
+
+autologin() {
+  mkdir -p "${managed%/*}" &&
+    printf '[Autologin]\nUser=%s\nSession=omarchy.desktop\nRelogin=false\n' "$1" >"$managed.tmp" &&
+    mv -f "$managed.tmp" "$managed"
+}
+
+if [[ ${1:-} == --clear ]]; then
+  rm -f "$OMU_SDDM_CONF_DIR/autologin.conf" "$managed" || exit 1
+  # /etc/sddm.conf outranks every drop-in; a desktop would open for whoever
+  # starts the computer. omarchy-mu-user-add refuses this; a later edit stops here.
+  if (( ${#accounts[@]} > 1 )) && omu_fixed_autologin; then
+    echo "/etc/sddm.conf logs someone in automatically on a computer with more than one person; remove its [Autologin] User=." >&2
+    exit 1
+  fi
+  exit 0
+fi
+
+# The record the unlock left, renamed so no later start this boot reuses it.
+consume_slot_record() {
+  local record=$OMU_SLOT_RECORD.used
+  [[ -f $OMU_SLOT_RECORD ]] || return 1
+  mv -f "$OMU_SLOT_RECORD" "$record" || return 1
+  cat "$record"
+}
+
+omu_load_drive || exit 1
+omu_encrypted || exit 0
+
+if (( ${#accounts[@]} == 1 )); then
+  autologin "${accounts[0]}"
+elif (( ${#accounts[@]} > 1 )); then
+  read -r uuid slot < <(consume_slot_record) || exit 0
+  [[ $uuid == "$OMU_UUID" && $slot =~ ^[0-9]+$ ]] || exit 0
+  ! omu_journal_pending || exit 0
+  omu_map_valid || exit 0
+  user=$(omu_map_user_for_slot "$uuid" "$slot")
+  [[ -n $user ]] && printf '%s\n' "${accounts[@]}" | grep -qx -- "$user" && omu_in_sync "$user" || exit 0
+  autologin "$user"
+fi

@@ -2,18 +2,14 @@ pragma ComponentBehavior: Bound
 
 import QtQuick 2.15
 import SddmComponents 2.0
-import "UserList.js" as UserList
 import "Strings.js" as Strings
 import "Password.js" as Password
 import "Power.js" as Power
 
-// Omarchy's greeter (upstream/sddm/omarchy/Main.qml) with a user list: every
-// account SDDM lists, by full name, plus an optional "Other user…" row that
-// reveals a username field. The password row is the stock one, asked twice
-// for an account that chooses its password at this login (Password.js). What
-// that account also needs hangs below the password row, so the logo and the
-// boxes stay put between users. The power actions SDDM offers sit at the
-// bottom, by click or F key (Power.js).
+// Omarchy's greeter (upstream/sddm/omarchy/Main.qml) as Omarchy PR #16920 made it:
+// a password alone, as at the disk prompt, tried for the last account and then each
+// other one until one logs in (Password.js, omarchy-mu-login-match). The power
+// actions SDDM offers sit at the bottom, by click or F key (Power.js).
 Rectangle {
   id: root
   width: 640
@@ -25,35 +21,22 @@ Rectangle {
     var dir = config.assetDir || "/usr/share/sddm/themes/omarchy/"
     return dir.charAt(dir.length - 1) === "/" ? dir : dir + "/"
   }
-  readonly property bool allowOther: String(config.allowOtherUser || "true") !== "false"
-  readonly property bool showUsername: String(config.showUsername || "true") !== "false"
-  readonly property int maxVisibleUsers: Math.max(1, parseInt(config.maxVisibleUsers || "6") || 6)
   readonly property string localeName: Qt.locale().name
   readonly property string fontFamily: "JetBrainsMono Nerd Font"
 
   // Filled from userModel by the Repeater below.
   property var userSlots: ({})
-  property var users: []
-  readonly property var entries: UserList.buildEntries(users, allowOther, showUsername)
-  property int selectedIndex: 0
-  // Set once someone moves the selection, so late model rows don't reset it.
-  property bool selectionTouched: false
-  readonly property var selected: entries.length > 0 ? entries[Math.min(selectedIndex, entries.length - 1)] : null
-  readonly property bool otherSelected: selected !== null && selected.other === true
-
+  property var userNames: []
   property bool loginFailed: false
-  // Accounts with an empty, expired password, from omarchy-mu-sddm-sync,
-  // plus any PAM reports as one; for them the password box takes the new
-  // password and a second box confirms it.
-  property var changeUsers: Password.parseUsers(config.passwordChangeUsers)
-  readonly property string loginName: UserList.loginUser(selected, otherUser.text)
-  readonly property bool changeMode: Password.needsChange(changeUsers, loginName)
-  // PAM's "change your password" notice comes with a login failure from
-  // SDDM while the change goes on: that one failure is skipped.
-  property bool changeNoticeSeen: false
-  property string lastPamMessage: ""
-  // Shown under the boxes: what is wrong with the new password.
-  property string message: ""
+  property var attemptUsers: []
+  property int attempt: 0
+  property string pending: ""
+  property bool awaiting: false
+  property int resends: 0
+  // SDDM sends LoginFailed twice for one failure. The second is consumed as such
+  // even if it arrives after the next account was sent, so it is never taken for
+  // that account's answer.
+  property int duplicates: 0
   readonly property var powerActions: Power.available(powerCaps)
   // All false until the daemon tells SDDM what the machine can do.
   readonly property var powerCaps: ({
@@ -77,72 +60,34 @@ Rectangle {
     return "file://" + assetDir + name
   }
 
-  function addUser(index, name, realName) {
-    userSlots[index] = { name: name, realName: realName }
-    var list = []
-    var keys = Object.keys(userSlots).map(Number).sort(function (a, b) { return a - b })
-    for (var i = 0; i < keys.length; i++)
-      list.push(userSlots[keys[i]])
-    users = list
-    if (!selectionTouched)
-      selectedIndex = UserList.initialIndex(entries, userModel.lastUser)
-    Qt.callLater(focusInput)
-  }
-
-  function select(index) {
-    selectionTouched = true
-    selectedIndex = Math.max(0, Math.min(index, entries.length - 1))
-    password.input.text = ""
-    confirm.input.text = ""
-    loginFailed = false
-    message = ""
-    pendingPower = null
-    focusInput()
-  }
-
-  function moveSelection(delta) {
-    select(UserList.step(selectedIndex, delta, entries.length))
-  }
-
-  // The wheel stops at the ends, where it must not clear the password either.
-  function scrollSelection(delta) {
-    var next = UserList.clampedStep(selectedIndex, delta, entries.length)
-    if (next !== selectedIndex)
-      select(next)
-  }
-
-  // The username field when "Other user…" is selected and still empty,
-  // otherwise the password.
-  function focusInput() {
-    if (otherSelected && otherUser.text.trim().length === 0)
-      otherUser.forceActiveFocus()
-    else
-      password.input.forceActiveFocus()
+  function addUser(index, name) {
+    userSlots[index] = name
+    userNames = Object.keys(userSlots).map(Number).sort(function (a, b) { return a - b })
+      .map(function (key) { return userSlots[key] })
   }
 
   function login() {
-    var user = loginName
-    if (user.length === 0) {
-      otherUser.forceActiveFocus()
+    attemptUsers = Password.candidates(userModel.lastUser, userNames)
+    if (attemptUsers.length === 0 || password.input.text.length === 0)
       return
-    }
-    if (changeMode) {
-      var problem = Password.check(password.input.text, confirm.input.text)
-      if (problem !== "") {
-        // Clearing a box clears the message, so that goes first.
-        confirm.input.text = ""
-        message = Strings.t(localeName, problem === "empty" ? "emptyPassword" : problem === "short" ? "shortPassword" : "mismatch")
-        if (problem !== "mismatch")
-          password.input.forceActiveFocus()
-        else
-          confirm.input.forceActiveFocus()
-        return
-      }
-    }
-    message = ""
-    lastPamMessage = ""
-    changeNoticeSeen = false
-    sddm.login(user, password.input.text, root.sessionIndex)
+    pending = password.input.text
+    attempt = 0
+    resends = 0
+    send()
+  }
+
+  function failLogin() {
+    pending = ""
+    awaiting = false
+    password.input.text = ""
+    loginFailed = true
+    password.input.forceActiveFocus()
+  }
+
+  function send() {
+    awaiting = true
+    sddm.login(attemptUsers[attempt], pending, root.sessionIndex)
+    unanswered.restart()
   }
 
   function requestPower(action) {
@@ -158,11 +103,10 @@ Rectangle {
   function runPower(action) {
     pendingPower = null
     password.input.text = ""
-    confirm.input.text = ""
     sddm[action.id]()
   }
 
-  // Shared by the text fields: list navigation, Escape and the power keys.
+  // Escape and the power keys.
   function handleCommonKey(event) {
     if (pendingPower !== null) {
       if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
@@ -181,13 +125,8 @@ Rectangle {
       if (event.key < Qt.Key_F1 || event.key > Qt.Key_F4)
         pendingPower = null
     }
-    if (event.key === Qt.Key_Up) {
-      moveSelection(-1)
-    } else if (event.key === Qt.Key_Down) {
-      moveSelection(1)
-    } else if (event.key === Qt.Key_Escape) {
+    if (event.key === Qt.Key_Escape) {
       password.input.text = ""
-      confirm.input.text = ""
     } else if (event.key >= Qt.Key_F1 && event.key <= Qt.Key_F4) {
       // Held down, the key would run it again as the machine wakes up.
       var action = Power.forFKey(powerCaps, event.key - Qt.Key_F1 + 1)
@@ -202,39 +141,70 @@ Rectangle {
 
   Connections {
     target: sddm
-    function onInformationMessage(text) {
-      root.lastPamMessage = text
-      if (Password.isChangeNotice(text)) {
-        root.changeNoticeSeen = true
-        root.changeUsers = Password.withUser(root.changeUsers, root.loginName)
-      }
-    }
     function onLoginFailed() {
-      if (root.changeNoticeSeen) {
-        root.changeNoticeSeen = false
+      if (root.duplicates > 0) {
+        root.duplicates--
         return
       }
-      root.loginFailed = true
-      password.input.text = ""
-      confirm.input.text = ""
-      if (root.changeMode)
-        root.message = root.lastPamMessage || Strings.t(root.localeName, "changeFailed")
-      password.input.forceActiveFocus()
+      root.duplicates = 1
+      pairWindow.restart()
+      if (!root.awaiting)
+        return
+      root.awaiting = false
+      unanswered.stop()
+      if (root.pending !== "" && root.attempt + 1 < root.attemptUsers.length) {
+        root.attempt++
+        root.resends = 0
+        nextAttempt.start()
+        return
+      }
+      root.failLogin()
     }
     function onLoginSucceeded() {
+      root.awaiting = false
+      unanswered.stop()
+      root.pending = ""
       root.loginFailed = false
     }
   }
 
-  // userModel's roles (name, realName) are only reachable by name from a
-  // delegate, so each delegate reports its row to root.users.
+  // SDDM reports a failure before its helper has exited, and silently drops a login
+  // sent before then, so the next account waits a moment; an attempt still unanswered
+  // after pam_unix's failure delay was dropped, and is sent again, a few times at most.
+  Timer {
+    id: nextAttempt
+    interval: 300
+    onTriggered: root.send()
+  }
+
+  Timer {
+    id: unanswered
+    interval: 5000
+    onTriggered: {
+      if (root.pending === "")
+        return
+      if (root.resends >= 3) {
+        root.failLogin()
+        return
+      }
+      root.resends++
+      root.send()
+    }
+  }
+
+  Timer {
+    id: pairWindow
+    interval: 1000
+    onTriggered: root.duplicates = 0
+  }
+
+  // userModel's name role is only reachable from a delegate, so each reports its row.
   Repeater {
     model: userModel
     delegate: Item {
       required property int index
       required property string name
-      required property string realName
-      Component.onCompleted: root.addUser(index, name, realName)
+      Component.onCompleted: root.addUser(index, name)
     }
   }
 
@@ -251,11 +221,10 @@ Rectangle {
   }
 
   // A password box: the stock entry image with a bullet per character (the
-  // text itself is transparent), and a hint while it is empty.
+  // text itself is transparent).
   component SecretField: Item {
     id: field
     property alias input: secret
-    property string placeholder: ""
     signal keyPressed(var event)
     width: fieldEntry.width
     height: fieldEntry.height
@@ -283,18 +252,6 @@ Rectangle {
       }
     }
 
-    Text {
-      text: field.placeholder
-      visible: secret.text.length === 0 && text.length > 0
-      color: root.textColor
-      opacity: 0.4
-      font.family: root.fontFamily
-      font.pixelSize: 22
-      anchors.left: parent.left
-      anchors.leftMargin: 20
-      anchors.verticalCenter: parent.verticalCenter
-    }
-
     TextInput {
       id: secret
       anchors.fill: parent
@@ -313,7 +270,6 @@ Rectangle {
 
       onTextChanged: {
         root.loginFailed = false
-        root.message = ""
       }
 
       Keys.onPressed: function (event) {
@@ -323,12 +279,7 @@ Rectangle {
   }
 
   Column {
-    // Centered, or higher when what hangs below the password row wouldn't
-    // clear the power actions. Counted for every user, so it never moves.
-    readonly property real centeredY: (root.height - height) / 2
-    readonly property real clearY: root.height - height - belowPassword.reservedHeight - 64
-    anchors.horizontalCenter: parent.horizontalCenter
-    y: Math.round(Math.max(0, Math.min(centeredY, clearY)))
+    anchors.centerIn: parent
     spacing: 40
 
     ThemeImage {
@@ -340,249 +291,29 @@ Rectangle {
       anchors.horizontalCenter: parent.horizontalCenter
     }
 
-    Column {
+    Row {
+      id: passwordRow
       anchors.horizontalCenter: parent.horizontalCenter
       spacing: 15
 
-      ListView {
-        id: userList
-        readonly property int rowHeight: root.showUsername ? 52 : 36
-        width: password.width
-        height: Math.min(count, root.maxVisibleUsers) * rowHeight
-        anchors.right: passwordRow.right
-        clip: true
-        interactive: count > root.maxVisibleUsers
-        boundsBehavior: Flickable.StopAtBounds
-        snapMode: ListView.SnapToItem
-        model: root.entries
-        currentIndex: root.selectedIndex
-        // A row stays visible on each side of the selected one, when it fits.
-        readonly property int contextHeight: root.maxVisibleUsers >= 3 ? rowHeight : 0
-        highlightRangeMode: ListView.ApplyRange
-        preferredHighlightBegin: contextHeight
-        preferredHighlightEnd: height - contextHeight
-        // Slides once someone moves; the last user starts in place.
-        highlightMoveVelocity: -1
-        highlightMoveDuration: root.selectionTouched ? 150 : 0
-        visible: count > 0
-
-        delegate: Item {
-          id: row
-          required property int index
-          required property var modelData
-          readonly property bool current: index === root.selectedIndex
-          width: userList.width
-          height: userList.rowHeight
-
-          Text {
-            id: marker
-            text: "›"
-            color: root.textColor
-            visible: row.current
-            font.family: root.fontFamily
-            font.pixelSize: 22
-            anchors.left: parent.left
-            anchors.leftMargin: 4
-            anchors.verticalCenter: label.verticalCenter
-          }
-
-          Text {
-            id: label
-            text: row.modelData.other ? Strings.t(root.localeName, "otherUser") : row.modelData.label
-            color: root.textColor
-            opacity: row.current ? 1.0 : 0.55
-            elide: Text.ElideRight
-            font.family: root.fontFamily
-            font.pixelSize: 22
-            anchors.left: parent.left
-            anchors.leftMargin: 24
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.topMargin: 2
-          }
-
-          Text {
-            text: row.modelData.secondary
-            visible: text.length > 0
-            color: root.textColor
-            opacity: row.current ? 0.6 : 0.35
-            elide: Text.ElideRight
-            font.family: root.fontFamily
-            font.pixelSize: 14
-            anchors.left: label.left
-            anchors.right: parent.right
-            anchors.top: label.bottom
-            anchors.topMargin: 2
-          }
-
-          MouseArea {
-            anchors.fill: parent
-            onClicked: root.select(row.index)
-          }
-        }
+      ThemeImage {
+        assetName: root.loginFailed ? "lock-failed.png" : "lock.png"
+        width: 34
+        height: 38
+        fillMode: Image.PreserveAspectFit
+        anchors.verticalCenter: parent.verticalCenter
       }
 
-      // Over the list, so the wheel selects instead of scrolling past the
-      // selection. Clicks and drags go through to the rows below.
-      MouseArea {
-        property real pending: 0
-        parent: userList
-        anchors.fill: parent
-        z: 1
-        acceptedButtons: Qt.NoButton
-        onWheel: function (event) {
-          pending += event.angleDelta.y
-          var notches = pending > 0 ? Math.floor(pending / 120) : Math.ceil(pending / 120)
-          if (notches !== 0) {
-            pending -= notches * 120
-            root.scrollSelection(-notches)
-          }
-        }
-      }
+      SecretField {
+        id: password
 
-      // Username field, only while "Other user…" is selected.
-      Item {
-        id: otherRow
-        visible: root.otherSelected
-        width: passwordRow.width
-        height: visible ? otherEntry.height : 0
-
-        ThemeImage {
-          id: otherEntry
-          assetName: root.loginFailed ? "entry-failed.png" : "entry.png"
-          anchors.right: parent.right
-        }
-
-        TextInput {
-          id: otherUser
-          anchors.fill: otherEntry
-          anchors.leftMargin: 20
-          anchors.rightMargin: 20
-          verticalAlignment: TextInput.AlignVCenter
-          clip: true
-          color: root.textColor
-          selectionColor: root.textColor
-          selectedTextColor: root.color
-          font.family: root.fontFamily
-          font.pixelSize: 22
-          inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText | Qt.ImhPreferLowercase
-          enabled: root.otherSelected
-
-          onTextChanged: root.loginFailed = false
-
-          Text {
-            text: Strings.t(root.localeName, "username")
-            visible: otherUser.text.length === 0
-            color: root.textColor
-            opacity: 0.4
-            font: otherUser.font
-            anchors.verticalCenter: parent.verticalCenter
-          }
-
-          Keys.onPressed: function (event) {
-            if (root.handleCommonKey(event))
-              return
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                || event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-              if (otherUser.text.trim().length > 0)
-                password.input.forceActiveFocus()
-              event.accepted = true
-            }
-          }
-        }
-      }
-
-      Row {
-        id: passwordRow
-        anchors.horizontalCenter: parent.horizontalCenter
-        spacing: 15
-
-        ThemeImage {
-          assetName: root.loginFailed ? "lock-failed.png" : "lock.png"
-          width: 34
-          height: 38
-          fillMode: Image.PreserveAspectFit
-          anchors.verticalCenter: parent.verticalCenter
-        }
-
-        SecretField {
-          id: password
-          placeholder: root.changeMode ? Strings.t(root.localeName, "newPassword") : ""
-
-          onKeyPressed: function (event) {
-            if (root.handleCommonKey(event))
-              return
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-              if (root.changeMode && password.input.text.length > 0 && confirm.input.text.length === 0)
-                confirm.input.forceActiveFocus()
-              else
-                root.login()
-              event.accepted = true
-            } else if (event.key === Qt.Key_Tab && root.changeMode) {
-              confirm.input.forceActiveFocus()
-              event.accepted = true
-            } else if ((event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) && root.otherSelected) {
-              otherUser.forceActiveFocus()
-              event.accepted = true
-            }
-          }
-        }
-      }
-
-      // Hangs from this row, so none of it moves what is above. One pixel tall:
-      // a Column skips an item with no height, and what is inside it.
-      Item {
-        width: passwordRow.width
-        height: 1
-
-        Column {
-          id: belowPassword
-          // The box and the notice, plus a line for a message. Not its height,
-          // which changes with the user.
-          readonly property real reservedHeight: confirm.height + notice.height + 24 + 2 * spacing
-          width: password.width
-          anchors.right: parent.right
-          spacing: 15
-
-          // The new password again, only for an account choosing it now.
-          SecretField {
-            id: confirm
-            visible: root.changeMode
-            placeholder: Strings.t(root.localeName, "confirmPassword")
-            input.enabled: root.changeMode
-
-            onKeyPressed: function (event) {
-              if (root.handleCommonKey(event))
-                return
-              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                root.login()
-                event.accepted = true
-              } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-                password.input.forceActiveFocus()
-                event.accepted = true
-              }
-            }
-          }
-
-          Text {
-            id: notice
-            width: parent.width
-            text: Strings.t(root.localeName, "choosePassword")
-            visible: root.changeMode
-            color: root.textColor
-            wrapMode: Text.WordWrap
-            font.family: root.fontFamily
-            font.pixelSize: 18
-          }
-
-          Text {
-            width: parent.width
-            text: root.message
-            visible: text.length > 0
-            color: root.textColor
-            wrapMode: Text.WordWrap
-            font.family: root.fontFamily
-            font.pixelSize: 16
+        onKeyPressed: function (event) {
+          if (root.handleCommonKey(event))
+            return
+          if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            if (root.pending === "" && !root.awaiting)
+              root.login()
+            event.accepted = true
           }
         }
       }
@@ -666,5 +397,5 @@ Rectangle {
     }
   }
 
-  Component.onCompleted: focusInput()
+  Component.onCompleted: password.input.forceActiveFocus()
 }

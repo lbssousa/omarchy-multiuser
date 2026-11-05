@@ -20,27 +20,18 @@ call_line() { grep -nF -- "$1" "$T/calls" | head -1 | cut -d: -f1; }
 assert_nothing_changed() {
   in_passwd bob || fail "bob was removed"
   assert_not_contains "$T/calls" userdel
-  assert_not_contains "$T/calls" omarchy-mu-luks-enroll
+  assert_not_contains "$T/calls" "omarchy-mu-user-helper forget"
   assert_not_contains "$T/calls" fprintd-delete
 }
 
 test_a_disk_password_that_stays_keeps_the_account() {
   setup
-  printf '#!/bin/bash\nexit 1\n' >"$T/stubs/omarchy-mu-luks-enroll"
+  echo forget >"$T/helper-fails"
   echo y >"$T/gum-answers"
   omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 && fail "said it removed bob"
   assert_contains "$T/out" "still opens the disk"
   in_passwd bob || fail "bob is gone, so nothing says whose keyslot that is"
   assert_not_contains "$T/calls" userdel
-}
-
-test_no_recorded_keyslot_is_nothing_to_do_even_without_a_disk() {
-  setup
-  printf '#!/bin/bash\necho cryptsetup >>"$T/calls"\nexit 1\n' >"$T/stubs/cryptsetup"
-  chmod +x "$T/stubs/cryptsetup"
-  fakeroot "$REPO/bin/omarchy-mu-luks-enroll" --locked --remove bob >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_contains "$T/out" "No disk keyslot recorded for bob."
-  assert_not_contains "$T/calls" cryptsetup
 }
 
 test_removes_account_and_what_it_leaves_behind() {
@@ -52,7 +43,7 @@ test_removes_account_and_what_it_leaves_behind() {
   assert_contains "$T/out" "Removed bob."
   assert_not_contains "$T/out" "mail spool"
   assert_no_file "$T/etc/sudoers.d/10_bob"
-  assert_contains "$T/calls" "omarchy-mu-luks-enroll --locked --remove bob"
+  assert_contains "$T/calls" "omarchy-mu-user-helper forget bob"
   assert_contains "$T/calls" "fprintd-delete bob"
   assert_contains "$T/calls" "loginctl disable-linger bob"
   assert_contains "$T/calls" "omarchy-mu-apply-lock --quiet"
@@ -158,7 +149,7 @@ test_running_programs_are_ended_before_anything_changes() {
   omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
   assert_contains "$T/calls" "has programs running"
   terminate=$(call_line "loginctl terminate-user bob")
-  luks=$(call_line "omarchy-mu-luks-enroll")
+  luks=$(call_line "omarchy-mu-user-helper forget")
   [[ -n $terminate && $terminate -lt $luks ]] || fail "the keyslot went before the sign-out"
   (( $(call_line "loginctl disable-linger bob") < terminate )) || fail "linger outlived the sign-out"
 }

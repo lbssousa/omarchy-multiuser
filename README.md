@@ -9,22 +9,23 @@ points the Omarchy menu at them.
 
 | Omarchy (single owner) | omarchy-multiuser |
 |---|---|
-| Greeter: a password box for the last user | Every user listed by **full name**, plus an optional **Other user…** field for any username |
-| Autologin of the owner, for good on encrypted installs | Always the greeter (`zz-omarchy-multiuser.conf`, `omarchy-mu-sddm-guard`) |
+| One password opens the disk, logs in and is root's | **Each person's password is their own LUKS key slot**: typing it at the disk prompt or the login screen says who they are |
+| Greeter: a password box for the last user | A password box that **finds the account**: no list, no username (`omarchy-mu-login-match`) |
+| Autologin of the owner, for good on encrypted installs | One automatic login, at that boot, for **whoever opened the disk** (`omarchy-mu-login-select`); the login screen any other time |
 | `omarchy-setup-security-fido2` writes `/etc/fido2/fido2` for one user and refuses a second | Each user adds their own line (`omarchy-mu-setup-security-fido2`); several keys per user |
 | `omarchy-remove-security-{fido2,fingerprint}` tear PAM and packages down for everyone | Each user removes their own keys/prints; machine-wide teardown only when nobody has any left |
 | `omarchy-apply-lock` drops fingerprint unlock if *the caller* has no prints | Kept while *any* user has prints (`omarchy-mu-apply-lock`, re-run by a path unit) |
 | Migrations stall for users outside `wheel` | Run what they can, privileged parts gated on an admin's run (`omarchy-mu-migrate`) |
 | Root has the owner's password; ISO installs grant the owner sudo by name | Root locked while there are several accounts; sudo grants by name or UID removed with the account (`omarchy-mu-accounts`) |
 | Update lock per user, update log at a fixed `/tmp` path | One machine-wide lock for administrators' updates and migrations, also from the migrations notice; a finished update's log moved aside |
-| — | `omarchy-mu-user-add`, `omarchy-mu-user-remove`, `omarchy-mu-user-admin`, `omarchy-mu-luks-enroll` |
+| — | `omarchy-mu-user-add`, `omarchy-mu-user-remove`, `omarchy-mu-user-admin`, `omarchy-mu-user-password` |
 
 ## The lock screen
 
 `shell/lock` is Omarchy's own lock screen (`upstream/shell/plugins/lock`, the
 `omarchy.lock` plugin) with, at the bottom, what doesn't need unlocking:
 
-- **Switch user** (F5): a new login screen, the session staying locked behind it;
+- **Switch user** (F5): the login screen, the session staying locked behind it;
 - **Suspend** (F1), **Reboot** (F3) and **Shut down** (F4), the greeter's keys.
   Reboot and Shut down ask first: Enter or a click confirms; Esc, typing or
   10 seconds cancels. A key or click that wakes a dark screen only wakes it.
@@ -33,7 +34,8 @@ Each is there only when the machine can do it (`omarchy-mu-lock-action
 capabilities`); Suspend follows the same switches as the system menu. Switch user
 also waits for the first console: SDDM 0.21 puts a new greeter there, and with an
 automatic login's desktop holding it that greeter fails and the screen stays dark.
-So right after installing this package it appears only once you have logged out.
+So on a desktop opened by the disk prompt, which is an automatic login, it appears
+only once you have logged out and back in at the login screen.
 
 **System › Switch User** in the menu does the same from an open desktop, for
 anyone once there are two accounts: it locks this desktop, then opens the person's
@@ -56,52 +58,68 @@ background is ignored, and the reader isn't taken back there, so the session can
 open unattended behind the login screen. Anyone at the keyboard can reboot or shut down from here, as they can from the greeter,
 which also closes the other users' sessions.
 
+## One password, one person
+
+The model comes from [Omarchy PR #16920](https://github.com/omacom/omarchy/pull/16920):
+
+- **Every account's password is also its own LUKS key slot**, recorded in
+  `/etc/omarchy-multiuser/slots` (`<UUID> <slot> <uid> <user> <fingerprint of the
+  shadow entry>`, root's alone, no key material). A password has at least 6
+  characters and opens no other account or slot: it is what says who you are.
+- **The disk prompt picks the person.** Once the map exists, the boot image carries a
+  small `cryptsetup` wrapper after `encrypt` (`omarchy-mu-luks-slot`), which runs the
+  real unlock once, keeps its exit status and only then notes which slot opened the
+  disk. `omarchy-mu-login-select`, before every SDDM start, turns that into one
+  automatic login for the slot's owner. Anything else shows the login screen: no
+  record, an unknown slot, a password changed with plain `passwd`, a change left
+  unfinished, a second SDDM start. With one account on an encrypted disk, that account
+  is logged in, as Omarchy does.
+- **The login screen is a password box alone.** Enter tries it for the last account,
+  then each other one SDDM lists, until one logs in. `omarchy-mu-login-match` runs first
+  in `/etc/pam.d/sddm` (`omarchy-mu-sddm-guard` keeps it there) and ends an attempt when
+  the password is another account's, so the wrong account costs neither a delay nor a
+  failed-login strike. A password that is nobody's counts once against each account.
+- **Changes go through `omarchy-mu-user-password`** (*Update › Password › User*, and
+  *Setup › Users › Change Password* for administrators), with `omarchy-mu-user-helper`
+  as root behind it. Each change is journaled, keeps the old password working until the
+  new one is proven everywhere, and is rolled back or forward by the next run if it
+  stopped part way. Adding a key takes a key the disk already knows, so it asks for
+  your own password.
+
+What it costs:
+
+- **Every password opens the whole disk**, and the disk is as strong as the weakest one.
+  With a live USB, anyone with a password can read and change everything.
+- **A desktop opened by the disk prompt holds the first console**, where SDDM 0.21 can't
+  put a login screen. From there, switching reaches only people already signed in;
+  for anyone else, log out first (*System › Switch User* offers it). Someone who logs in
+  at the login screen has no such limit.
+- **New accounts need their password up front.** There is no list to pick them from, so
+  they can no longer choose it at their first login.
+- **Boot code of our own.** The wrapper sits in the initramfs. It is checked with
+  `busybox ash -n` at build time and left out if it doesn't parse. Omarchy's PR ran
+  it through Plymouth and the console on real installs; a wrong copy here could stop the
+  disk from opening, so keep a live USB at hand the first time. Each slot also adds a key
+  derivation, about a second, to a wrong password at the disk prompt.
+- **Accounts SDDM doesn't list can't log in here** (UIDs outside `MinimumUid`..`MaximumUid`,
+  or on directory accounts): use a text console.
+- **Apple Silicon** refuses a second person's slot until its boot package records them,
+  and a systemd initramfs (no `encrypt` hook) shows the login screen after the disk prompt.
+
+**Coming from an earlier version.** Run `omarchy-mu-user-password` for each person, yours
+first. Your login password has to open the disk; if it doesn't, make them the same with
+`omarchy-drive-password`. Slots recorded by the old `omarchy-mu-luks-enroll` are replaced
+then. Until then the machine shows the login screen after the disk prompt, and accounts
+that were waiting to choose a password can't log in.
+
 ## The greeter
 
 `/usr/share/sddm/themes/omarchy-multiuser` is Omarchy's own theme
-(`upstream/sddm/omarchy/Main.qml`) with a user list above the password row:
-
-- one row per account SDDM lists (uid ≥ 1000, a login shell), showing the
-  GECOS full name, or the username when it is empty, with the username in
-  small print underneath;
-- the last user preselected (`RememberLastUser`);
-- a last **Outro usuário… / Other user…** row that reveals a username field;
-- ↑/↓ (which wrap around) or the mouse wheel over the list change the user from
-  either field, Tab moves between username and password, Enter logs in, Esc
-  clears the password, a click selects.
-- an account that chooses its password at this login — an empty, expired
-  password, what `omarchy-mu-user-add` leaves by default and
-  `omarchy-mu-accounts first-login <user>` gives a locked account — gets
-  **Nova senha** and **Repita a senha** boxes instead, and logs in once both
-  match;
-- at the bottom, **Suspend** (F1), **Hibernate** (F2), **Reboot** (F3) and
-  **Shut down** (F4), by click or key, each only when SDDM says the machine can
-  do it. An action keeps its key when another is missing. Reboot and Shut down
-  ask first: Enter or a click confirms; Esc, typing or 10 seconds cancels.
-
-SDDM has no way to show PAM's "new password" prompts: it answers translated
-ones with what was typed in the greeter. For such an account that text becomes
-the new password at once, so the greeter has it typed twice first.
-`omarchy-mu-sddm-sync` lists these accounts in `theme.conf.user`
-(`passwordChangeUsers`), rerun whenever `/etc/shadow` changes; an account
-PAM reports as expired after that is added on the spot. An expired password
-that isn't empty can't be changed from the greeter (PAM would get the old
-password as the new one): log in on a text console for that.
-
-Limits of choosing the password at the login screen:
-
-- **Language.** It needs PAM's prompts translated, as `/etc/locale.conf` has
-  them: SDDM 0.21 recognizes the English "New password", answers it with the
-  user name and the repeat with the typed text, and PAM refuses the change.
-  `first-login` checks this and refuses; `omarchy-mu-user-add` then asks for
-  the password as before.
-- **First come.** Until the password is chosen, anyone at the login screen or
-  a text console can choose it, so an administrator's account gives them root.
-  `su` asks for a password (no `nullok`) and sshd refuses empty ones by default.
-  `omarchy-mu-user-add --set-password` asks for it up front instead.
-- **Keep the stack's `nullok`.** The empty password only gets past
-  `system-auth` with it. Without it the account can't log in until an
-  administrator runs `passwd <user>`.
+(`upstream/sddm/omarchy/Main.qml`) with the password search above and, at the bottom,
+**Suspend** (F1), **Hibernate** (F2), **Reboot** (F3) and **Shut down** (F4), by click or
+key, each only when SDDM says the machine can do it. An action keeps its key when another
+is missing. Reboot and Shut down ask first: Enter or a click confirms; Esc, typing or 10
+seconds cancels.
 
 It keeps following **Appearance › Unlock**: the images come from the stock theme,
 which `omarchy-plymouth-set` recolors, and `omarchy-mu-sddm-sync` (run by
@@ -110,7 +128,7 @@ The recolor applies to everyone's login screen, so the menu offers it to
 administrators only.
 
 Full names come from GECOS: `chfn -f "Full Name" <user>`, or
-`omarchy-mu-user-add`, which asks for one.
+`omarchy-mu-user-add`, which asks for one. *System › Switch User* shows them.
 
 ## Who can do what
 
@@ -121,6 +139,9 @@ Administrators are the members of `wheel`; everyone else is in
 - add or remove **their own** line in `/etc/fido2/fido2` through
   `omarchy-mu-fido2-authfile` (the user comes from `SUDO_USER`, never from
   the arguments), with their own password;
+- change **their own** password through `omarchy-mu-user-helper password-self`,
+  which takes the user from `SUDO_USER`, asks for the current password and allows
+  three tries an hour;
 - re-run `omarchy-mu-apply-lock`, which takes no input, without a password.
 
 The same helper also runs through `pkexec`, for the
@@ -159,8 +180,9 @@ administrator's theme set.
 
 ## Accounts and root
 
-`omarchy-mu-user-add` and `-remove` hold `/run/lock/omarchy-mu-accounts.lock`
-(as does `omarchy-mu-luks-enroll`), so two account changes never interleave.
+`omarchy-mu-user-add` and `-remove` hold `/run/lock/omarchy-mu-accounts.lock`,
+so two account changes never interleave, and `omarchy-mu-user-helper` holds
+`omarchy-mu-slots.lock` (root's alone) for each password change.
 The lock files come from `tmpfiles.d`, `root:wheel 0640`: only
 administrators can open them.
 

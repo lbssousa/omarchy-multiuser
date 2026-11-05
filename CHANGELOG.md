@@ -2,7 +2,25 @@
 
 ## Unreleased
 
-From Omarchy PRs #16100 and #16920, and the session-switching findings posted there.
+**The password says who you are**, as in Omarchy PR #16920. This replaces the list of
+users on the login screen. See "Coming from an earlier version" in the README.
+
+- Each account's password is also its own LUKS key slot, on encrypted installs, in
+  `/etc/omarchy-multiuser/slots`. It has at least 6 characters and is nobody else's.
+- The disk prompt picks the person: the boot image notes which slot opened the disk
+  (`omarchy-mu-luks-slot`), and `omarchy-mu-login-select` opens that person's desktop,
+  once. With one account on an encrypted disk, it is logged in.
+- The login screen is a password box that finds the account (`omarchy-mu-login-match`).
+  The user list, **Other user…** and choosing a password at the first login are gone.
+- `omarchy-mu-user-password` changes a password everywhere at once, also from
+  *Update › Password › User*. `omarchy-mu-user-helper` does it as root, journaled.
+- `omarchy-mu-user-add` asks for the new password and yours; `--luks` and
+  `--set-password` are gone. `omarchy-mu-user-remove` takes the key off the disk without
+  anyone's disk password. `omarchy-mu-luks-enroll` and `omarchy-mu-accounts first-login`
+  are gone.
+- Depends on `perl`, no longer on `gettext`.
+
+Also from Omarchy PRs #16100 and #16920, and the session-switching findings posted there.
 
 - Lock screen: **Switch user** isn't offered while a desktop holds the first
   console, as an automatic login's does until its first logout. SDDM's greeter
@@ -17,9 +35,8 @@ From Omarchy PRs #16100 and #16920, and the session-switching findings posted th
 - Menu: *Setup › Users*' entries no longer turn up in the search of users outside
   wheel.
 - `omarchy-mu-user-add` refuses while `/etc/sddm.conf` logs someone in automatically.
-- `omarchy-mu-user-remove` stops when the account's disk password can't be removed,
+- `omarchy-mu-user-remove` stops when the account's key can't be taken off the disk,
   instead of saying it removed the account while that password still opens the disk.
-- Greeter: a password chosen at the first login has at least 6 characters.
 - SDDM: `ReuseSession=true` is set here, since coming back to a session relies on it.
 
 ## 0.9.0 (2026-11-03)

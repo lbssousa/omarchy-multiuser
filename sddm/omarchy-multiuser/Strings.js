@@ -3,15 +3,6 @@
 
 var catalogs = {
   en: {
-    otherUser: "Other user…",
-    username: "Username",
-    choosePassword: "First login: choose your password",
-    newPassword: "New password",
-    confirmPassword: "Repeat the password",
-    emptyPassword: "Type a password",
-    shortPassword: "Use at least 6 characters",
-    mismatch: "The passwords don't match",
-    changeFailed: "The password wasn't changed",
     suspend: "Suspend",
     hibernate: "Hibernate",
     reboot: "Reboot",
@@ -22,15 +13,6 @@ var catalogs = {
     cancel: "Cancel"
   },
   pt: {
-    otherUser: "Outro usuário…",
-    username: "Nome de usuário",
-    choosePassword: "Primeiro acesso: escolha sua senha",
-    newPassword: "Nova senha",
-    confirmPassword: "Repita a senha",
-    emptyPassword: "Digite uma senha",
-    shortPassword: "Use pelo menos 6 caracteres",
-    mismatch: "As senhas não coincidem",
-    changeFailed: "A senha não foi alterada",
     suspend: "Suspender",
     hibernate: "Hibernar",
     reboot: "Reiniciar",
