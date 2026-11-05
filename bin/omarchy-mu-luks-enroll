@@ -34,6 +34,12 @@ elif [[ ${1:-} != --list ]]; then
   omu_hold_lock accounts || omu_die "Another account change is in progress."
 fi
 
+# Nothing recorded means nothing to do, on an unencrypted machine too.
+if [[ ${1:-} == --remove && -n ${2:-} ]] && ! awk -v u="$2" '$1 == u { found = 1 } END { exit !found }' "$registry" 2>/dev/null; then
+  echo "No disk keyslot recorded for $2."
+  exit 0
+fi
+
 # The LUKS device holding root: crypttab's "root" entry, else the kernel
 # command line (cryptdevice= or rd.luks.uuid=).
 luks_device() {
@@ -73,11 +79,7 @@ case ${1:-} in
   --remove)
     user=${2:-}
     [[ -n $user ]] || omu_die "Usage: omarchy-mu-luks-enroll --remove <user>"
-    slot=$(awk -v u="$user" '$1 == u { print $2 }' "$registry" 2>/dev/null | tail -1)
-    if [[ -z $slot ]]; then
-      echo "No disk keyslot recorded for $user."
-      exit 0
-    fi
+    slot=$(awk -v u="$user" '$1 == u { print $2 }' "$registry" | tail -1)
     (( $(slots "$device" | wc -l) > 1 )) || omu_die "Keyslot $slot is the last one; refusing to lock the disk for good."
     echo "Removing $user's disk keyslot ($slot); authorize with any disk password."
     cryptsetup luksKillSlot "$device" "$slot"

@@ -15,6 +15,7 @@ post_install() {
   echo "   systemctl --global enable omarchy-mu-login.service"
   echo ":: Add users to the omarchy-users group; the greeter changes at the next login screen."
   echo ":: With several accounts, lock root's password: omarchy-mu-accounts root-sync"
+  echo ":: Switch user appears after logging out once: an automatic login's desktop can't leave for the login screen."
 }
 
 post_upgrade() {

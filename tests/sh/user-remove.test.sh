@@ -24,6 +24,25 @@ assert_nothing_changed() {
   assert_not_contains "$T/calls" fprintd-delete
 }
 
+test_a_disk_password_that_stays_keeps_the_account() {
+  setup
+  printf '#!/bin/bash\nexit 1\n' >"$T/stubs/omarchy-mu-luks-enroll"
+  echo y >"$T/gum-answers"
+  omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 && fail "said it removed bob"
+  assert_contains "$T/out" "still opens the disk"
+  in_passwd bob || fail "bob is gone, so nothing says whose keyslot that is"
+  assert_not_contains "$T/calls" userdel
+}
+
+test_no_recorded_keyslot_is_nothing_to_do_even_without_a_disk() {
+  setup
+  printf '#!/bin/bash\necho cryptsetup >>"$T/calls"\nexit 1\n' >"$T/stubs/cryptsetup"
+  chmod +x "$T/stubs/cryptsetup"
+  fakeroot "$REPO/bin/omarchy-mu-luks-enroll" --locked --remove bob >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_contains "$T/out" "No disk keyslot recorded for bob."
+  assert_not_contains "$T/calls" cryptsetup
+}
+
 test_removes_account_and_what_it_leaves_behind() {
   setup
   printf 'bob ALL=(ALL) ALL\n' >"$T/etc/sudoers.d/10_bob"

@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# omarchy:summary=Switch to another person's desktop, locking yours first
+# omarchy:args=[NAME]
+#
+# Their own desktop when they have one running, whose lock asks their password;
+# otherwise the login screen. Either way the password is typed on their side of
+# the switch, never here.
+#
+# Usage: omarchy-mu-user-switch [<user>]
+#        omarchy-mu-user-switch --available   exits 0 when there is someone to pick
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+me=$(id -un)
+mapfile -t others < <(omu_human_users | grep -vx -- "$me" || true)
+
+if [[ ${1:-} == --available ]]; then
+  (( ${#others[@]} > 0 ))
+  exit
+fi
+
+if (( ${#others[@]} == 0 )); then
+  omarchy-notification-send -g 󰀄 "There is no one else to switch to."
+  exit 1
+fi
+
+name=${1:-}
+if [[ -z $name ]]; then
+  options=()
+  for other in "${others[@]}"; do
+    full_name=$(getent passwd "$other" | cut -d: -f5 | cut -d, -f1)
+    options+=("󰀄"$'\t'"${full_name:-$other}"$'\t'"$other")
+  done
+  # The label and the subtext come back: the subtext is the account.
+  choice=$(omarchy-menu-select "Switch to" "${options[@]}" -- --width 440) || exit 0
+  [[ -n $choice ]] || exit 0
+  name=${choice##*$'\t'}
+fi
+printf '%s\n' "${others[@]}" | grep -qx -- "$name" || omu_die "There is no one else named $name."
+
+session=$(loginctl list-sessions --json=short |
+  jq -r --arg user "$name" 'first(.[] | select(.user == $user and .seat == "seat0" and .class == "user") | .session) // empty')
+
+if [[ -z $session ]] && ! omu_first_console_free; then
+  omarchy-notification-send -u critical -g 󰍃 "Log out to let $name sign in" \
+    "This desktop holds the console the login screen needs. Click to log out." \
+    --exec omarchy-system logout
+  exit 0
+fi
+
+# Locked before anything switches, so this desktop is never left open behind the
+# other one.
+omarchy-system-lock
+locked=false
+for _ in {1..50}; do
+  if omarchy-hyprland-session-locked; then
+    locked=true
+    break
+  fi
+  sleep 0.1
+done
+$locked || omu_die "Could not lock this desktop, so nothing was switched."
+
+# Omarchy's own lock screen, if it is the one running, knows neither request: this
+# desktop then keeps the reader until it blanks, and asks for the password on return.
+if [[ -n $session ]]; then
+  omarchy-shell lock releaseReader >/dev/null 2>&1 || true
+  loginctl activate "$session"
+elif [[ $(omarchy-shell lock switchUser 2>/dev/null) != ok ]]; then
+  omarchy-mu-lock-action switchUser
+fi

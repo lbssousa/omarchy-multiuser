@@ -159,6 +159,21 @@ test_a_watcher_that_fails_only_warns() {
   assert_contains "$T/etc/passwd" "bob:x:"
 }
 
+test_refuses_while_sddm_conf_logs_someone_in() {
+  setup
+  printf '[Autologin]\nUser=owner\n' >"$T/etc/sddm.conf"
+  omarchy-mu-user-add bob --full-name "Bob B" 2>"$T/err" && fail "added a second person to an automatic login"
+  assert_contains "$T/err" "logs someone in automatically"
+  assert_not_contains "$T/calls" useradd
+}
+
+test_an_sddm_conf_without_automatic_login_is_fine() {
+  setup
+  printf '[Autologin]\nUser=\n\n[Other]\nUser=owner\n' >"$T/etc/sddm.conf"
+  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_contains "$T/calls" useradd
+}
+
 test_refuses_a_kept_home() {
   setup
   mkdir "$T/home/bob"

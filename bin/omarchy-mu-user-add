@@ -66,6 +66,9 @@ getent group "$user" >/dev/null && omu_die "A group named $user already exists."
 # useradd would keep it, owned by the account it was kept for (the new one
 # never gets that UID), and the new account couldn't use its own home.
 [[ ! -e $OMU_HOME_DIR/$user ]] || omu_die "$OMU_HOME_DIR/$user already exists; move it aside first (sudo mv $OMU_HOME_DIR/$user $OMU_HOME_DIR/$user.old)."
+# It outranks zz-omarchy-multiuser.conf: the first person would keep being logged
+# in automatically, at every boot, with a second one on the machine.
+! omu_fixed_autologin || omu_die "/etc/sddm.conf logs someone in automatically; remove User= from its [Autologin] section first."
 [[ -n ${full_name//[[:space:]]/} ]] || omu_die "A full name is required (the login screen lists it)."
 [[ $full_name != *[:,]* && $full_name != *$'\n'* ]] || omu_die "The full name can't contain ':' ',' or line breaks."
 [[ -x $shell ]] || omu_die "No such shell: $shell"

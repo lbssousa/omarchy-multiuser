@@ -86,7 +86,9 @@ fi
 
 sudo omarchy-mu-fido2-authfile remove --user "$user" >/dev/null 2>&1 || true
 sudo fprintd-delete "$user" >/dev/null 2>&1 || true
-sudo omarchy-mu-luks-enroll --locked --remove "$user" || true
+# Before userdel: running this again still knows whose keyslot it is.
+sudo omarchy-mu-luks-enroll --locked --remove "$user" ||
+  omu_die "$user's disk password still opens the disk, so the account stays. Run this again to finish."
 # Before userdel: the grants must not outlive the account, even if this stops.
 sudo omarchy-mu-accounts drop-grants "$user"
 

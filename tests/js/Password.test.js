@@ -41,7 +41,9 @@ test("pam_unix's change notices", () => {
 
 test("the two password fields", () => {
   assert.equal(P.check("", ""), "empty")
-  assert.equal(P.check("abc", "abd"), "mismatch")
-  assert.equal(P.check("abc", ""), "mismatch")
-  assert.equal(P.check("abc", "abc"), "")
+  assert.equal(P.check("abc", "abc"), "short")
+  assert.equal(P.check("abcde", "abcde"), "short")
+  assert.equal(P.check("abcdef", "abcdeg"), "mismatch")
+  assert.equal(P.check("abcdef", ""), "mismatch")
+  assert.equal(P.check("abcdef", "abcdef"), "")
 })

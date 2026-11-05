@@ -30,7 +30,16 @@ points the Omarchy menu at them.
   10 seconds cancels. A key or click that wakes a dark screen only wakes it.
 
 Each is there only when the machine can do it (`omarchy-mu-lock-action
-capabilities`); Suspend follows the same switches as the system menu.
+capabilities`); Suspend follows the same switches as the system menu. Switch user
+also waits for the first console: SDDM 0.21 puts a new greeter there, and with an
+automatic login's desktop holding it that greeter fails and the screen stays dark.
+So right after installing this package it appears only once you have logged out.
+
+**System › Switch User** in the menu does the same from an open desktop, for
+anyone once there are two accounts: it locks this desktop, then opens the person's
+running session, where their own lock asks for their password, or the login screen.
+With an automatic login's desktop on the first console it offers to log out instead.
+A session left unlocked on another console is opened as it is, as Ctrl+Alt+F*n* would.
 
 `omarchy-mu-login` enables it once per account, as `lbssousa.lock`, in place of
 `omarchy.lock`. To go back: `omarchy plugin disable lbssousa.lock`; it stays off.
@@ -42,7 +51,9 @@ twice: SDDM asks logind to unlock it, and a lock left with Switch user listens f
 that until it ends. A lock left any other way doesn't. Telling logind to unlock
 someone else's session takes an administrator's password (polkit's
 `lock-sessions`), but the session's own programs can do it while it waits in the
-background. Anyone at the keyboard can reboot or shut down from here, as they can from the greeter,
+background. A password or fingerprint accepted only after the session went to the
+background is ignored, and the reader isn't taken back there, so the session can't
+open unattended behind the login screen. Anyone at the keyboard can reboot or shut down from here, as they can from the greeter,
 which also closes the other users' sessions.
 
 ## The greeter

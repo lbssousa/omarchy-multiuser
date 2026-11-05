@@ -27,7 +27,7 @@ setup() {
   stub omarchy-system
   stub omarchy-toggle-enabled 'exit ${SUSPEND_OFF:-1}'
   stub omarchy-sleep-disabled 'exit ${SLEEP_DISABLED:-1}'
-  stub loginctl 'echo "${ACTIVE:-yes}"'
+  stub loginctl '[[ $1 == list-sessions ]] && { echo "${SESSIONS:-[]}"; exit 0; }; [[ $1 == activate ]] && exit ${ACTIVATE_STATUS:-0}; echo "${ACTIVE:-yes}"'
   cat >"$T/stubs/busctl" <<STUB
 #!/bin/bash
 echo "busctl \$*" >>"$calls"
@@ -192,6 +192,36 @@ test_capabilities_follow_the_machine() {
   # A prompt for a password would open behind the lock.
   assert_eq "$(CAN_REBOOT=challenge omarchy-mu-lock-action capabilities | jq -c .reboot)" false
   assert_eq "$(CAN_POWEROFF=no omarchy-mu-lock-action capabilities | jq -c .powerOff)" false
+}
+
+test_switching_waits_for_the_first_console() {
+  setup
+  held='[{"session":"1","user":"ana","seat":"seat0","class":"user","tty":"tty1"}]'
+  assert_eq "$(SESSIONS=$held omarchy-mu-lock-action capabilities | jq -c .switchUser)" false
+  # Only that entry: the rest of the lock screen stays.
+  assert_eq "$(SESSIONS=$held omarchy-mu-lock-action capabilities | jq -c .reboot)" true
+  on_its_own='[{"session":"3","user":"ana","seat":"seat0","class":"user","tty":"tty2"},{"session":"c1","user":"sddm","seat":"seat0","class":"greeter","tty":"tty1"},{"session":"4","user":"ana","seat":null,"class":"manager","tty":null}]'
+  assert_eq "$(SESSIONS=$on_its_own omarchy-mu-lock-action capabilities | jq -c .switchUser)" true
+}
+
+test_switching_is_not_offered_when_the_sessions_cant_be_read() {
+  setup
+  assert_eq "$(SESSIONS='not json' omarchy-mu-lock-action capabilities | jq -c .switchUser)" false
+  stub loginctl 'exit 1'
+  assert_eq "$(omarchy-mu-lock-action capabilities | jq -c .switchUser)" false
+}
+
+test_a_running_login_screen_is_gone_back_to() {
+  setup
+  SESSIONS='[{"session":"c1","user":"sddm","seat":"seat0","class":"greeter","tty":"tty1"}]' omarchy-mu-lock-action switchUser
+  assert_contains "$calls" "loginctl activate c1"
+  assert_not_contains "$calls" SwitchToGreeter
+}
+
+test_a_login_screen_that_cant_be_gone_back_to_is_asked_for_again() {
+  setup
+  ACTIVATE_STATUS=1 SESSIONS='[{"session":"c1","user":"sddm","seat":"seat0","class":"greeter","tty":"tty1"}]' omarchy-mu-lock-action switchUser
+  assert_contains "$calls" SwitchToGreeter
 }
 
 test_actions_run_what_they_should() {

@@ -88,6 +88,26 @@ omu_sign_out() {
   fi
 }
 
+# SDDM 0.21 starts a new greeter on the first console. An automatic login's
+# desktop holds that console, so the greeter fails there and leaves the desktop
+# dark with no way back. A normal login's desktop has a console of its own, and
+# an earlier greeter on the first one can be gone back to. Not knowing counts as
+# held: the cost of a wrong yes is a dark screen, of a wrong no a missing entry.
+omu_first_console_free() {
+  local sessions
+  sessions=$(loginctl list-sessions --json=short 2>/dev/null) || return 1
+  jq -e 'all(.[]; .tty != "tty1" or .class == "greeter")' <<<"$sessions" >/dev/null 2>&1
+}
+
+# omu_fixed_autologin — /etc/sddm.conf, which outranks every drop-in, names
+# someone to log in automatically: the login screen would never show.
+omu_fixed_autologin() {
+  [[ -f $OMU_ROOT/etc/sddm.conf ]] || return 1
+  awk '/^\[/ { section = $0 }
+    section == "[Autologin]" && /^[ \t]*User[ \t]*=[ \t]*[^ \t]/ { found = 1 }
+    END { exit !found }' "$OMU_ROOT/etc/sddm.conf"
+}
+
 # omu_atomic_write <dest> <mode> — stdin to a sibling temp file, then rename,
 # so readers never see a half-written file and a symlink at <dest> is
 # replaced rather than followed.

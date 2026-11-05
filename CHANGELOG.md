@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+From Omarchy PRs #16100 and #16920, and the session-switching findings posted there.
+
+- Lock screen: **Switch user** isn't offered while a desktop holds the first
+  console, as an automatic login's does until its first logout. SDDM's greeter
+  fails there and leaves the screen dark.
+- Lock screen: a login screen already running is gone back to instead of asking
+  for a second one, which fails on the same console; F5 can't ask twice in a row.
+- Lock screen: a password or fingerprint accepted once the session is in the
+  background doesn't open it, and neither a resume nor a screen coming back gives
+  a session in the background the fingerprint reader.
+- Menu: **System › Switch User** (`omarchy-mu-user-switch`) locks this desktop, then
+  opens the person's running session or the login screen.
+- Menu: *Setup › Users*' entries no longer turn up in the search of users outside
+  wheel.
+- `omarchy-mu-user-add` refuses while `/etc/sddm.conf` logs someone in automatically.
+- `omarchy-mu-user-remove` stops when the account's disk password can't be removed,
+  instead of saying it removed the account while that password still opens the disk.
+- Greeter: a password chosen at the first login has at least 6 characters.
+- SDDM: `ReuseSession=true` is set here, since coming back to a session relies on it.
+
 ## 0.9.0 (2026-11-03)
 
 The lock screen can switch user and turn the machine off without unlocking.

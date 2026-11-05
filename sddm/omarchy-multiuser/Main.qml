@@ -131,8 +131,8 @@ Rectangle {
       if (problem !== "") {
         // Clearing a box clears the message, so that goes first.
         confirm.input.text = ""
-        message = Strings.t(localeName, problem === "empty" ? "emptyPassword" : "mismatch")
-        if (problem === "empty")
+        message = Strings.t(localeName, problem === "empty" ? "emptyPassword" : problem === "short" ? "shortPassword" : "mismatch")
+        if (problem !== "mismatch")
           password.input.forceActiveFocus()
         else
           confirm.input.forceActiveFocus()

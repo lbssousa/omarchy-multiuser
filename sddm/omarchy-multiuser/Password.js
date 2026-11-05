@@ -44,10 +44,15 @@ function isChangeNotice(message) {
     .test(String(message || ""))
 }
 
+// A floor, as in Omarchy PR #16920: this account may well be an administrator's.
+var MIN_LENGTH = 6
+
 // "" when the two fields can go to sddm.login(), else what is wrong with them.
 function check(password, confirmation) {
   if (String(password || "").length === 0)
     return "empty"
+  if (String(password).length < MIN_LENGTH)
+    return "short"
   if (password !== confirmation)
     return "mismatch"
   return ""
