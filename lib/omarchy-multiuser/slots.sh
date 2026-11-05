@@ -144,6 +144,17 @@ omu_drive_slots() {
     /^Key Slot [0-9]+: ENABLED/ { sub(":", "", $3); print $3 }' <<<"$dump" | paste -sd, -
 }
 
+# A token (systemd-tpm2, systemd-fido2, clevis...) can open the disk with nobody
+# typing a password. 0 when the header has one, and when it can't be read.
+omu_drive_has_tokens() {
+  local dump
+  dump=$(LC_ALL=C cryptsetup luksDump "$OMU_DRIVE" 2>/dev/null) || return 0
+  awk '
+    /^[^ \t]/ { tokens = ($0 == "Tokens:") }
+    tokens && /^ +[0-9]+: / { found = 1 }
+    END { exit !found }' <<<"$dump"
+}
+
 # 0 when the slot holds a key, 1 when it doesn't, 2 when the disk can't be read.
 omu_slot_enabled() {
   local slots
