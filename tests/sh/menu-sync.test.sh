@@ -123,4 +123,45 @@ test_catalog_matches_block_and_omarchy() {
   ' <(printf '{\n%s\n}\n' "$(cat "$REPO/share/menu-block.jsonc")") "$REPO/share/menu-labels.json" "$locales" || fail "menu-labels.json out of date"
 }
 
+# The menu gives a user entry without a label its bare id, so the block's
+# overrides of Omarchy's entries are written whole, labelled in the menu's language.
+fake_upstream() {
+  mkdir -p "$T/i18n/pt-BR"
+  cat >"$T/upstream.jsonc" <<'JSON'
+{
+  "install": {"icon":"I","label":"Install"},
+  "update.omarchy": {"icon":"U","iconFont":"omarchy","label":"Omarchy","action":"stock"},
+}
+JSON
+  printf '{"install":{"label":"Instalar"},"update.omarchy":{"label":"Omarchy"}}\n' >"$T/i18n/pt-BR/menu.json"
+  export OMU_UPSTREAM_MENU=$T/upstream.jsonc OMU_UPSTREAM_I18N=$T/i18n
+}
+
+test_overrides_are_written_whole() {
+  fake_upstream
+  echo pt-BR >"$T/language"
+  OMARCHY_LANGUAGE_FILE=$T/language omarchy-mu-menu-sync "$T/menu.jsonc"
+  valid_jsonc "$T/menu.jsonc"
+  assert_contains "$T/menu.jsonc" '"install": {"icon":"I","label":"Instalar","searchTerms":["Install"],"when":"omarchy-mu-is-admin"},'
+  # The block's own fields win; a label the language keeps adds no search term.
+  assert_contains "$T/menu.jsonc" '"update.omarchy": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-update","icon":"U","iconFont":"omarchy","label":"Omarchy"},'
+  echo en >"$T/language"
+  OMARCHY_LANGUAGE_FILE=$T/language omarchy-mu-menu-sync "$T/menu.jsonc"
+  assert_contains "$T/menu.jsonc" '"install": {"icon":"I","label":"Install","when":"omarchy-mu-is-admin"},'
+}
+
+# A whole entry the file already has (by hand, or omarchy-setup's overrides)
+# would be replaced by a later one with the same id: the block leaves it out.
+test_leaves_ids_set_outside_the_block() {
+  printf '{\n  "setup.security.fido2": {"label":"Mine","action":"mine"},\n}\n' >"$T/menu.jsonc"
+  omarchy-mu-menu-sync "$T/menu.jsonc"
+  valid_jsonc "$T/menu.jsonc"
+  assert_eq "$(grep -c '"setup.security.fido2"' "$T/menu.jsonc")" 1
+  assert_contains "$T/menu.jsonc" '"setup.security.fido2": {"label":"Mine","action":"mine"},'
+  assert_contains "$T/menu.jsonc" omarchy-mu-remove-security-fido2
+  cp "$T/menu.jsonc" "$T/once"
+  omarchy-mu-menu-sync "$T/menu.jsonc"
+  cmp -s "$T/once" "$T/menu.jsonc" || fail "second run changed the file"
+}
+
 run_tests

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Menu: entries the block changes in Omarchy's menu (*Install*, *Update ›
+  Omarchy*, *Update › Channel*, the security and removal entries…) showed their
+  bare id, with no icon. Omarchy gives a user entry without a label its id
+  before merging it over its own, so `omarchy-mu-menu-sync` now writes them
+  whole: Omarchy's entry, labelled in the menu's language with the English
+  label kept for the search, then the block's fields. An id the file already
+  sets outside the block, such as omarchy-setup's overrides of the FIDO2 and
+  fingerprint entries, is left to that entry instead of being replaced.
+
 ## 0.11.0 (2026-11-05)
 
 - Menu: **System › Switch User** and *Setup › Users*' entries are written in the
