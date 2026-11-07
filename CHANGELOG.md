@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.1 (2026-11-07)
 
 - Menu: entries the block changes in Omarchy's menu (*Install*, *Update ›
   Omarchy*, *Update › Channel*, the security and removal entries…) showed their
