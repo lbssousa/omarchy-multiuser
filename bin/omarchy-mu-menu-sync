@@ -4,8 +4,16 @@
 # omarchy:hidden=true
 #
 # The Omarchy menu merges ~/.config/omarchy/extensions/omarchy-menu.jsonc
-# over its own definition, entry by entry (an existing id keeps the fields it
-# isn't given). This keeps share/menu-block.jsonc there between two marker
+# over its own definition, entry by entry. It fills each user entry's missing
+# fields first (no label: the id; no icon: none), so an entry that only
+# changes `action` or `when` would show its bare id. The block's entries that
+# override one of Omarchy's are therefore written whole: Omarchy's entry, its
+# label in the menu's language (default/i18n/<code>/menu.json, the English one
+# kept as a search term), then the block's fields. An id the file already sets
+# outside the block (by hand, or omarchy-setup's overrides) is left to that
+# entry: a later one would replace it whole.
+#
+# This keeps share/menu-block.jsonc there between two marker
 # comments, right before the file's closing brace, replacing an older copy and
 # leaving everything else alone. /etc/skel's copy belongs to omarchy-settings,
 # so instead of seeding it, omarchy-mu-menu-sync.service (enabled globally)
@@ -40,19 +48,66 @@ if [[ -f $language_file ]]; then
   [[ $language =~ ^[a-z]{2,3}(-[A-Za-z]{2})?$ ]] || language=en
 fi
 
+upstream_menu=${OMU_UPSTREAM_MENU:-/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc}
+upstream_i18n=${OMU_UPSTREAM_I18N:-/usr/share/omarchy/default/i18n}
+
 translated=$(mktemp)
 trap 'rm -f "$translated"' EXIT
 # shellcheck disable=SC2016  # Perl, not shell
 perl -CSD -MJSON::PP -e '
-  my ($catalog_file, $language) = @ARGV;
-  my $labels = {};
-  if (open my $fh, "<:encoding(UTF-8)", $catalog_file) {
+  my ($catalog_file, $language, $upstream_menu, $upstream_i18n, $user_file) = @ARGV;
+  my $read = sub {
+    my ($file) = @_;
+    open my $fh, "<:encoding(UTF-8)", $file or return undef;
     local $/;
-    my $catalog = eval { JSON::PP->new->decode(<$fh>) } || {};
-    $labels = $catalog->{$language} if ref $catalog->{$language} eq "HASH";
+    return <$fh>;
+  };
+  my $labels = {};
+  my $catalog = eval { JSON::PP->new->decode($read->($catalog_file) // "") } || {};
+  $labels = $catalog->{$language} if ref $catalog->{$language} eq "HASH";
+  # Omarchy entries, one per line, and their labels in the menu language.
+  my %upstream;
+  for my $line (split /\n/, $read->($upstream_menu) // "") {
+    next unless $line =~ /^\s*"([^"]+)"\s*:\s*(\{.*\})\s*,?\s*$/;
+    my $entry = eval { JSON::PP->new->decode($2) };
+    $upstream{$1} = $entry if ref $entry eq "HASH";
+  }
+  my $menu_catalog = {};
+  if ($language ne "en") {
+    $menu_catalog = eval { JSON::PP->new->decode($read->("$upstream_i18n/$language/menu.json") // "") } || {};
+  }
+  # Ids the file sets outside the block.
+  my (%outside, $inside);
+  for my $line (split /\n/, $read->($user_file) // "") {
+    if (index($line, ">>> omarchy-multiuser") >= 0) { $inside = 1; next }
+    if (index($line, "<<< omarchy-multiuser") >= 0) { $inside = 0; next }
+    $outside{$1} = 1 if !$inside && $line =~ /^\s*"([^"]+)"\s*:\s*\{/;
   }
   my $json = JSON::PP->new->allow_nonref;
+  my $out = JSON::PP->new->canonical;
   while (my $line = <STDIN>) {
+    if ($line =~ /^\s*"([^"]+)":\s*\{/ && $outside{$1}) {
+      next;
+    }
+    if ($line =~ /^(\s*)"([^"]+)":\s*(\{.*\})(,?)\s*$/ && $upstream{$2}) {
+      my ($indent, $id, $body, $comma) = ($1, $2, $3, $4);
+      my $entry = $json->decode($body);
+      if (!exists $entry->{label}) {
+        my %whole = %{ $upstream{$id} };
+        my $local = ref $menu_catalog->{$id} eq "HASH" ? $menu_catalog->{$id} : {};
+        for my $field (qw(label title description)) {
+          $whole{$field} = $local->{$field} if defined $local->{$field};
+        }
+        if (defined $upstream{$id}{label} && $whole{label} ne $upstream{$id}{label}) {
+          my @terms = @{ $whole{searchTerms} || [] };
+          push @terms, $upstream{$id}{label} unless grep { $_ eq $upstream{$id}{label} } @terms;
+          $whole{searchTerms} = \@terms;
+        }
+        %whole = (%whole, %$entry);
+        print $indent, $json->encode($id), ": ", $out->encode(\%whole), $comma, "\n";
+        next;
+      }
+    }
     if ($line =~ /^\s*"([^"]+)":\s*\{/ && defined(my $label = $labels->{$1})) {
       $line =~ s{"label":("(?:[^"\\]|\\.)*")}{
         my $english = $1;
@@ -61,7 +116,7 @@ perl -CSD -MJSON::PP -e '
       }e;
     }
     print $line;
-  }' "$OMU_SHARE/menu-labels.json" "$language" <"$block" >"$translated"
+  }' "$OMU_SHARE/menu-labels.json" "$language" "$upstream_menu" "$upstream_i18n" "$file" <"$block" >"$translated"
 
 if [[ ! -f $file ]]; then
   mkdir -p "$(dirname "$file")"
