@@ -6,9 +6,17 @@
 #
 # Runs as root before every SDDM start (sddm.service.d/omarchy-mu-login-select.conf).
 # --clear runs first and must succeed for SDDM to start: it takes away any automatic
-# login. The second run then names, in the last-sorting drop-in, the one account on
-# an encrypted disk or, with more than one, the account whose key slot unlocked the
-# disk this boot, used once. Anything it can't be sure of shows the login screen.
+# login. The second run then chooses the one account on an encrypted disk or, with
+# more than one, the account whose key slot unlocked the disk this boot, used once.
+# Anything it can't be sure of shows the login screen.
+#
+# The choice is not SDDM's automatic login, whose desktop takes the first console
+# SDDM 0.21 needs for every later login screen. It is a one-time pass
+# ($OMU_LOGIN_TICKET) and SDDM's last user: the greeter logs that user in as it
+# comes up, and omarchy-mu-login-once, in SDDM's PAM stack, lets that one login
+# through. The desktop gets a console of its own, as any login at the login
+# screen does, and switching users needs no logout. A greeter that doesn't try
+# (another theme) shows the login screen.
 # A disk with a token (TPM2, FIDO2, clevis) may have opened with nobody typing a
 # password, so there even the one account needs its slot on record. Once Omarchy
 # ships its own (omarchy-login-select), this only takes its own drop-in away.
@@ -26,10 +34,43 @@ umask 022
 managed=$OMU_SDDM_AUTOLOGIN
 mapfile -t accounts < <(omu_human_users)
 
+# SDDM's state.conf with [Last] User= set to $1, everything else as it was.
+with_last_user() {
+  local source=/dev/null
+  [[ ! -f $OMU_SDDM_STATE ]] || source=$OMU_SDDM_STATE
+  awk -v u="$1" '
+    /^\[/ {
+      if (in_last && !done) { print "User=" u; done = 1 }
+      in_last = ($0 == "[Last]")
+      print
+      next
+    }
+    in_last && /^[ \t]*User[ \t]*=/ { if (!done) { print "User=" u; done = 1 } next }
+    { print }
+    END {
+      if (!done) {
+        if (!in_last) print "[Last]"
+        print "User=" u
+      }
+    }' "$source"
+}
+
+# The file is SDDM's: it keeps its owner and mode.
+set_last_user() {
+  local state=$OMU_SDDM_STATE mode=600
+  [[ -d ${state%/*} ]] || return 1
+  [[ ! -f $state ]] || mode=$(stat -c %a -- "$state") || return 1
+  with_last_user "$1" | omu_atomic_write "$state" "$mode" || return 1
+  chown --reference="${state%/*}" -- "$state"
+}
+
 autologin() {
-  mkdir -p "${managed%/*}" &&
-    printf '[Autologin]\nUser=%s\nSession=omarchy.desktop\nRelogin=false\n' "$1" >"$managed.tmp" &&
-    mv -f "$managed.tmp" "$managed"
+  local boot
+  [[ -r $OMU_BOOT_ID ]] && boot=$(<"$OMU_BOOT_ID") || return 1
+  [[ -n $boot ]] || return 1
+  set_last_user "$1" || return 1
+  mkdir -p "${OMU_LOGIN_TICKET%/*}" &&
+    printf '%s %s %s\n' "$1" "$boot" "$(date +%s)" | omu_atomic_write "$OMU_LOGIN_TICKET" 600
 }
 
 # Omarchy's own omarchy-login-select decides once it ships: ours only takes its own
@@ -40,7 +81,7 @@ if omu_upstream_users; then
 fi
 
 if [[ ${1:-} == --clear ]]; then
-  rm -f "$OMU_SDDM_CONF_DIR/autologin.conf" "$managed" || exit 1
+  rm -f "$OMU_SDDM_CONF_DIR/autologin.conf" "$managed" "$OMU_LOGIN_TICKET" || exit 1
   # /etc/sddm.conf outranks every drop-in; a desktop would open for whoever
   # starts the computer. omarchy-mu-user-add refuses this; a later edit stops here.
   if (( ${#accounts[@]} > 1 )) && omu_fixed_autologin; then

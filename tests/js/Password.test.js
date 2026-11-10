@@ -18,3 +18,11 @@ test("nobody to try", () => {
   assert.deepEqual(P.candidates("", undefined), [])
   assert.deepEqual(P.candidates("", ["", null]), [])
 })
+
+test("the greeter logs in by itself only a plain account name", () => {
+  assert.equal(P.autoLoginUser("bia"), "bia")
+  assert.equal(P.autoLoginUser(""), "")
+  assert.equal(P.autoLoginUser(undefined), "")
+  assert.equal(P.autoLoginUser("../bia"), "")
+  assert.equal(P.autoLoginUser("Bia"), "")
+})

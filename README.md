@@ -33,15 +33,16 @@ points the Omarchy menu at them.
 
 Each is there only when the machine can do it (`omarchy-mu-lock-action
 capabilities`); Suspend follows the same switches as the system menu. Switch user
-also waits for the first console: SDDM 0.21 puts a new greeter there, and with an
-automatic login's desktop holding it that greeter fails and the screen stays dark.
-So on a desktop opened by the disk prompt, which is an automatic login, it appears
-only once you have logged out and back in at the login screen.
+also waits for the first console: SDDM 0.21 puts a new greeter there, and with a
+desktop holding it that greeter fails and the screen stays dark. Only SDDM's own
+automatic login puts a desktop there, and this package doesn't use it, so this
+matters only after `/etc/sddm.conf` or another tool has logged someone in that way.
 
 **System › Switch User** in the menu does the same from an open desktop, for
 anyone once there are two accounts: it locks this desktop, then opens the person's
 running session, where their own lock asks for their password, or the login screen.
-With an automatic login's desktop on the first console it offers to log out instead.
+With a desktop on the first console (SDDM's own automatic login) it offers to log out
+instead.
 A session left unlocked on another console is opened as it is, as Ctrl+Alt+F*n* would.
 
 `omarchy-mu-login` enables it once per account, as `lbssousa.lock`, in place of
@@ -71,7 +72,11 @@ The model comes from [Omarchy PR #16920](https://github.com/omacom/omarchy/pull/
   small `cryptsetup` wrapper after `encrypt` (`omarchy-mu-luks-slot`), which runs the
   real unlock once, keeps its exit status and only then notes which slot opened the
   disk. `omarchy-mu-login-select`, before every SDDM start, turns that into one
-  automatic login for the slot's owner. Anything else shows the login screen: no
+  automatic login for the slot's owner. It is not SDDM's own: the greeter logs them in
+  as it comes up, with a one-time pass that `omarchy-mu-login-once` checks in SDDM's PAM
+  stack (their name, this boot, the last minute, taken by the first try), so the
+  desktop gets a console of its own, as any login at the login screen does. Another
+  SDDM theme makes no such try and shows the login screen. Anything else shows the login screen: no
   record, an unknown slot, a password changed with plain `passwd`, a change left
   unfinished, a second SDDM start. With one account on an encrypted disk, that account
   is logged in, as Omarchy does, unless the disk has a token (TPM2, FIDO2, clevis):
@@ -98,10 +103,6 @@ What it costs:
 
 - **Every password opens the whole disk**, and the disk is as strong as the weakest one.
   With a live USB, anyone with a password can read and change everything.
-- **A desktop opened by the disk prompt holds the first console**, where SDDM 0.21 can't
-  put a login screen. From there, switching reaches only people already signed in;
-  for anyone else, log out first (*System › Switch User* offers it). Someone who logs in
-  at the login screen has no such limit.
 - **New accounts need their password up front.** There is no list to pick them from, so
   they can no longer choose it at their first login.
 - **Boot code of our own.** The wrapper sits in the initramfs. It is checked with
