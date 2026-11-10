@@ -57,11 +57,11 @@
   // Accounts: everyone changes their own password here, administrators anyone's and
   // the rest. The menu's search doesn't look at the parent's `when`, so each entry
   // has its own.
-  "setup.users": {"icon":"","label":"Users"},
-  "setup.users.add": {"icon":"","label":"Add User","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-add"},
-  "setup.users.remove": {"icon":"","label":"Remove User","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-remove"},
-  "setup.users.admin": {"icon":"","label":"Administrator Rights","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-admin"},
-  "setup.users.apps": {"icon":"","label":"Blocked Apps","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-apps"},
-  "setup.users.password": {"icon":"","label":"Change Password","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-password"},
+  "setup.users": {"icon":"","label":"Users"},
+  "setup.users.add": {"icon":"","label":"Add User","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-add"},
+  "setup.users.remove": {"icon":"","label":"Remove User","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-remove"},
+  "setup.users.admin": {"icon":"󰟵","label":"Administrator Rights","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-admin"},
+  "setup.users.apps": {"icon":"󰀻","label":"Blocked Apps","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-apps"},
+  "setup.users.password": {"icon":"","label":"Change Password","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-password"},
   // This machine's per-user setup (omarchy-setup), when it is installed.
-  "setup.omarchy-setup": {"icon":"","label":"Omarchy Setup","when":"command -v omarchy-setup-user","action":"omarchy-launch-floating-terminal-with-presentation omarchy-setup-user"},
+  "setup.omarchy-setup": {"icon":"","label":"Omarchy Setup","when":"command -v omarchy-setup-user","action":"omarchy-launch-floating-terminal-with-presentation omarchy-setup-user"},
