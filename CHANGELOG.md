@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 (2026-11-10)
 
 Closer to Omarchy PR #16920.
 
@@ -26,7 +26,7 @@ Closer to Omarchy PR #16920.
   (your own; anyone's for an administrator), and *Update › Password › User* is gone.
   *Update › Password › Drive Encryption* (`omarchy-mu-drive-password`) leaves the
   system disk out once each person's password is their own key to it, and says so
-  when no other encrypted drive is left.
+  when no other encrypted drive is left. Add Nerd Font icons to user management entries.
 - Children, from the PR: `omarchy-mu-user-add --child` makes an account in
   `omarchy-child` (and `omarchy-users`), with no other groups and a local git
   identity. Blocked apps per person (*Setup › Users › Blocked Apps*,

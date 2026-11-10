@@ -4,7 +4,7 @@
 # $startdir), so `makepkg` in packaging/ packages the working tree as is.
 
 pkgname=omarchy-multiuser
-pkgver=0.11.1
+pkgver=0.12.0
 pkgrel=1
 pkgdesc='Several people on one Omarchy machine, picked by their own password: per-user disk keys, FIDO2 and fingerprints, migrations for non-admins'
 arch=(any)
