@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.1 (2026-11-10)
 
 - **Switching users no longer asks the person the disk prompt logged in to log out
   first.** SDDM's own automatic login put that desktop on the first console, where
