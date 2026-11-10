@@ -16,7 +16,7 @@ points the Omarchy menu at them.
 | `omarchy-remove-security-{fido2,fingerprint}` tear PAM and packages down for everyone | Each user removes their own keys/prints; machine-wide teardown only when nobody has any left |
 | `omarchy-apply-lock` drops fingerprint unlock if *the caller* has no prints | Kept while *any* user has prints (`omarchy-mu-apply-lock`, re-run by a path unit) |
 | Migrations stall for users outside `wheel` | Run what they can, privileged parts gated on an admin's run (`omarchy-mu-migrate`) |
-| Root has the owner's password; ISO installs grant the owner sudo by name | Root locked while there are several accounts; sudo grants by name or UID removed with the account (`omarchy-mu-accounts`) |
+| Root has the owner's password; ISO installs grant the owner sudo by name | Root's password follows its holder, an administrator, and passes to whoever removes them; sudo grants by name or UID removed with the account |
 | Update lock per user, update log at a fixed `/tmp` path | One machine-wide lock for administrators' updates and migrations, also from the migrations notice; a finished update's log moved aside |
 | — | `omarchy-mu-user-add`, `omarchy-mu-user-remove`, `omarchy-mu-user-admin`, `omarchy-mu-user-password` |
 
@@ -81,12 +81,18 @@ The model comes from [Omarchy PR #16920](https://github.com/omacom/omarchy/pull/
   in `/etc/pam.d/sddm` (`omarchy-mu-sddm-guard` keeps it there) and ends an attempt when
   the password is another account's, so the wrong account costs neither a delay nor a
   failed-login strike. A password that is nobody's counts once against each account.
-- **Changes go through `omarchy-mu-user-password`** (*Update › Password › User*, and
-  *Setup › Users › Change Password* for administrators), with `omarchy-mu-user-helper`
+- **Changes go through `omarchy-mu-user-password`** (*Setup › Users › Change Password*,
+  for everyone: your own, or anyone's for an administrator; *Update › Password › User*,
+  plain `passwd`, is gone, as in Omarchy's PR), with `omarchy-mu-user-helper`
   as root behind it. Each change is journaled, keeps the old password working until the
   new one is proven everywhere, and is rolled back or forward by the next run if it
-  stopped part way. Adding a key takes a key the disk already knows, so it asks for
-  your own password.
+  stopped part way. *Update › Password › Drive Encryption* (`omarchy-mu-drive-password`)
+  offers only the other encrypted drives once accounts have their own keys: the system
+  disk's follow each person's password. `omarchy-drive-password` itself stays usable in
+  a terminal. Adding and removing an account go through it too
+  (`omarchy-mu-user-add`, `omarchy-mu-user-remove`): the account, its key and its
+  password are one change. Adding a key takes a key the disk already knows, so it asks
+  for your own password.
 
 What it costs:
 
@@ -158,11 +164,28 @@ action to anyone outside `wheel` and `omarchy-users`.
 Fingerprints need no root at all: fprintd lets a user in an active session
 enroll and delete their own.
 
+The commands root runs for someone else without a root password
+(`omarchy-mu-user-helper`, `omarchy-mu-apply-lock`, `omarchy-mu-fido2-authfile`
+and the PAM step `omarchy-mu-login-match`) take as little as they can from
+whoever started them, as Omarchy's PR does (`lib/omarchy-multiuser/security.sh`):
+
+- they start with `#!/bin/bash -p` and refuse any other start (`bash script`,
+  `bash -p script`), so Bash reads no `BASH_ENV` and imports no functions;
+- they start again without `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`, `PS4`,
+  `CDPATH`, `GLOBIGNORE`, `IFS` or exported functions, which privileged Bash
+  ignores but would pass on to what they run;
+- as root they use a fixed `PATH` and a fixed umask, and, run through sudo, pkexec
+  or PAM, ignore the `OMU_*` overrides the tests use (the helper ignores them
+  whenever it is root). Through sudo, `omarchy-mu-apply-lock` copies the
+  fingerprint resume hook from `/usr/share/omarchy` only, whatever
+  `OMARCHY_PATH` says.
+
 The menu hides from everyone else what would only end in sudo's refusal:
 **Install**, the **Remove** entries that drop packages (what lives in their
 own home, such as web apps, TUIs and mise dev envs, stays), and
-**Update › Channel, Firmware, Timezone, Time**, *Config › Plymouth* and
-*Hardware › Trackpad*.
+**Update › Channel, Firmware, Timezone, Time**, *Update › Password › Drive
+Encryption*, *Config › Plymouth* and *Hardware › Trackpad*. Their *Setup › Users*
+has only *Change Password*, for their own.
 
 The entries this package adds (**System › Switch User** and *Setup › Users*) are
 written in the language Omarchy shows, from `share/menu-labels.json`, which has
@@ -186,31 +209,81 @@ be asked for an administrator's password, and an administrator should never
 type theirs into someone else's session. The browsers keep the color an
 administrator's theme set.
 
+## Children
+
+As in Omarchy's PR, a child is an account in `omarchy-child`. Here it is also a
+limited account (`omarchy-users`), so everything above for limited accounts applies.
+`omarchy-mu-user-add --child` (or answering yes to "Is … a child?") makes one, with
+no other groups: not `input`, not `docker`. An administrator can't be a child; take
+someone out of `omarchy-child` before giving them administrator rights.
+
+- **Blocked apps, per person** (*Setup › Users › Blocked Apps*, `omarchy-mu-user-apps`,
+  for children and limited accounts). Packages stay installed for the whole machine.
+  - Each person's list (`/var/lib/omarchy-multiuser/blocked-apps/<user>`) names apps
+    they don't run: `omarchy-mu-user-apps-apply` denies the program, and its own
+    directory, with an ACL. A pacman hook does this again after every upgrade, which
+    replaces programs.
+  - A program everyone needs (a shell, an interpreter, a browser's launcher,
+    Omarchy's) is never denied, so web apps are hidden only.
+  - A new child starts with the PR's list blocked: the messaging, social and work
+    web apps.
+  - The PR hides the entries in the shell's launcher, which a package can't change.
+    Here the hidden entry is a desktop file of the same id in the child's own
+    `~/.local/share/applications`, written as them; one of theirs already there is
+    set aside and comes back when the app does. A child can undo the hiding, never
+    the ACL.
+- **An administrator's password opens a child's lock screen**, so a parent can step
+  in. After the child's own password fails, the lock screen asks
+  `omarchy-mu-user-helper adult-check` through the child's one `NOPASSWD` grant.
+  The answer is rate limited (after five misses, two minutes, doubling up to an
+  hour) and logged to the auth log.
+- **A local git identity** (`<user>@localhost`), so a child's first login asks for none.
+
+What a grown-up's password in a child's session costs, as the PR says: it is typed
+where the child sits. The lock screen runs `sudo` and the helper by absolute path, so
+a script on the child's `PATH` can't catch it, but a child able to change their own
+session (`LD_PRELOAD`, a shell of their own) could. And any password a child knows is
+a disk key: from a live USB they can read the whole disk. These keep a child to what
+was agreed; they don't stop a determined one.
+
+Not here yet, waiting on Omarchy:
+- screen time (#11196);
+- the Kids theme collection (#12488);
+- the web allowlist;
+- a child's own Wi-Fi networks (the shell's network panel);
+- hiding a child's update notices.
+
 ## Accounts and root
 
 `omarchy-mu-user-add` and `-remove` hold `/run/lock/omarchy-mu-accounts.lock`,
 so two account changes never interleave, and `omarchy-mu-user-helper` holds
-`omarchy-mu-slots.lock` (root's alone) for each password change.
+`omarchy-mu-slots.lock` (root's alone) for each change it makes: adding an account,
+removing one, a password. Its journal (`/var/lib/omarchy-multiuser/password-journal`)
+lets the next run undo an add that stopped before the account had its password, and
+finish one that stopped after; a removal only goes forward.
 The lock files come from `tmpfiles.d`, `root:wheel 0640`: only
 administrators can open them.
 
-- **Root.** `omarchy-provision-owner` gives root the owner's password, so with
-  more people anyone who learns it reaches root outside `wheel`. Adding the
-  second account locks root first; removing down to one account gives root
-  that account's password hash back, when it's the caller and an
-  administrator. On machines that already have several accounts, run
-  `omarchy-mu-accounts root-sync` once. A locked root also means no password
-  for systemd's emergency shell.
+- **Root.** `omarchy-provision-owner` gives root the owner's password. As in Omarchy's
+  PR, root's password then has a holder (`/etc/omarchy-multiuser/root`): the first
+  administrator who makes a change with the password root has. Every password is its
+  person's alone, so only the holder knows root's. Changing the holder's password
+  changes root's in the same write. Removing the holder hands root to the
+  administrator removing them, whose password the removal asks for, and taking the
+  holder's rights away hands it over first (`omarchy-mu-user-helper root-take`).
+  Earlier versions locked root with several people; that root comes back, unlocked,
+  with its owner's next change, or at once with `sudo omarchy-mu-user-helper root-take`.
 - **Sudo grants.** Removal deletes the installer's `NN_<user>` grant and
   `omarchy-sudo-passwordless`' `99-omarchy-*nopasswd-<uid>` rules before
-  `userdel`, and warns about other sudoers rules naming the account. New accounts get the lowest UID that owns nothing in
+  `userdel`, after locking the account and ending what it runs, and warns about other sudoers rules naming the account. New accounts get the lowest UID that owns nothing in
   `/home`, so a kept home never passes to someone else, and a name whose
   group or `/home` folder still exists is refused. Adding an administrator
   writes `%wheel ALL=(ALL:ALL) ALL` when an ISO install only granted the owner
   by name.
 - **Removing.** `omarchy-mu-user-remove` asks whether to delete the home
   (`--keep-home` and `--delete-home` answer for it; keeping is the default
-  answer), and every question comes before anything changes. An account with
+  answer), and every question, your password included, comes before anything
+  changes. An account with
   programs running, in a session or not, is logged out if you agree, and its
   lingering turned off. SDDM shows nothing on the first console after a desktop it
   logged in automatically is forced to end, so it is asked for the login screen,
@@ -221,7 +294,8 @@ administrators can open them.
   (*Setup › Users › Administrator Rights*) adds the account to wheel,
   writing the `%wheel` rule when it's missing, or takes it out: the grants
   that would keep root outside wheel go first, as on removal, and the
-  account stays in `omarchy-users`. It then fails, rather than say the rights
+  account stays in `omarchy-users`. When root's password is theirs, it becomes
+  yours first. It then fails, rather than say the rights
   are gone, when `sudo -l -U` still shows a rule for every command (also one
   for a group) or the account is in `docker`. Open programs keep sudo until the
   account logs out, so it offers to log them out. It won't take away your
@@ -262,6 +336,28 @@ everyone else it runs `omarchy-mu-migrate` itself, which classifies each migrati
 
 The first migration that can't run stops the run, as upstream does; the next
 login retries. `just classify-migrations` prints the classes for review.
+
+## When Omarchy ships Setup › Users
+
+[Omarchy PR #16920](https://github.com/omacom/omarchy/pull/16920) brings the password
+model above into Omarchy itself, with records in the same format under
+`/etc/omarchy/users`. Once its `omarchy-user-helper` and `omarchy-login-select` are
+installed, this package steps aside for them:
+
+- `omarchy-mu-handoff` (run by a pacman hook when they arrive, and on this package's
+  install or upgrade) finishes any change our journal holds, then copies the slot map
+  and root's holder to `/etc/omarchy/users`, never over Omarchy's own. It rebuilds the
+  boot image, which then carries Omarchy's `cryptsetup` wrapper instead of ours. Only
+  one wrapper is ever in the boot image. `omarchy-mu-handoff --check` says where
+  things stand.
+- `omarchy-mu-login-select` only takes its own drop-in away, and `omarchy-mu-sddm-guard`
+  takes `omarchy-mu-login-match` out of `/etc/pam.d/sddm`: Omarchy's do the same.
+- `omarchy-mu-user-helper` refuses changes, so there is one journal: Omarchy's.
+  `omarchy-mu-user-password`, `-add` and `-remove` hand over to `omarchy-user-password`,
+  `-add` and `-delete`. Removing still takes the account's FIDO2 keys and fingerprints
+  first, and adding still sets up who records migrations.
+- Everything else stays with this package: FIDO2 and fingerprints per user,
+  migrations for non-administrators, the update lock, the lock screen and the greeter.
 
 ## Install
 

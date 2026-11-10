@@ -8,8 +8,10 @@
 # the sudo grants that would outlive them (the installer's by name,
 # omarchy-sudo-passwordless' by UID, which a later account could be given).
 # Refuses system accounts, the account running it and the last administrator.
-# Every question comes before anything changes. When one account is left, root
-# gets its password back, as omarchy-provision-owner set it up.
+# Every question comes before anything changes. omarchy-mu-user-helper removes
+# the account as one journaled change that only goes forward: a stop part way is
+# finished by the next run. When root's password was theirs, it becomes yours,
+# which is why it asks for your password.
 #
 # Usage: omarchy-mu-user-remove [<user>] [--keep-home|--delete-home]
 # Without either option it asks what to do with the home directory.
@@ -69,6 +71,15 @@ else
   what="and DELETE their home directory"
 fi
 gum confirm --default=false "Remove $user $what?" || exit 1
+# Once Omarchy ships its own Setup › Users, its omarchy-user-delete removes the
+# account and asks for your password itself.
+upstream=false
+if omu_upstream_users; then
+  upstream=true
+else
+  own_password=$(gum input --password --header "Your password ($(id -un)), the current one") || exit 1
+  printf '%s\n' "$own_password" | sudo omarchy-mu-user-helper verify || exit 1
+fi
 
 # userdel refuses while the account has programs running, so ask now.
 sign_out=false
@@ -86,31 +97,17 @@ fi
 
 sudo omarchy-mu-fido2-authfile remove --user "$user" >/dev/null 2>&1 || true
 sudo fprintd-delete "$user" >/dev/null 2>&1 || true
-# Before userdel: running this again still knows whose keyslot it is.
-sudo omarchy-mu-user-helper forget "$user" ||
-  omu_die "$user's password still opens the disk, so the account stays. Run this again to finish."
-# Before userdel: the grants must not outlive the account, even if this stops.
-sudo omarchy-mu-accounts drop-grants "$user"
-
-userdel_args=()
-[[ $home_choice == delete ]] && userdel_args=(--remove)
-home_left=false
-if ! output=$(sudo userdel "${userdel_args[@]}" "$user" 2>&1); then
-  printf '%s\n' "$output" >&2
-  # userdel can remove the account and then fail on its home.
-  getent passwd "$user" >/dev/null && omu_die "Couldn't remove $user; run this again to finish."
-  home_left=true
-elif [[ -n $output ]]; then
-  # Omarchy has no local mail, so the warning that there's no spool is noise.
-  grep -v 'mail spool' <<<"$output" >&2 || true
+helper_args=("$user")
+[[ $home_choice == delete ]] && helper_args+=(--delete-home)
+if $upstream; then
+  "$OMU_UPSTREAM_BIN/omarchy-user-delete" "${helper_args[@]}" || omu_die "$user wasn't removed."
+else
+  printf '%s\n' "$own_password" | sudo omarchy-mu-user-helper delete "${helper_args[@]}" ||
+    omu_die "Couldn't remove $user. Run this again, or finish with: sudo omarchy-mu-user-helper finish"
 fi
 
 # The account is gone: what depends on that happens even if its home isn't.
 sudo omarchy-mu-apply-lock --quiet || true
 sudo omarchy-mu-accounts sync-migration-watchers ||
   echo "Warning: run sudo omarchy-mu-accounts sync-migration-watchers to finish." >&2
-sudo omarchy-mu-accounts root-sync
-if $home_left; then
-  omu_die "Removed $user, but couldn't delete $home; delete it by hand."
-fi
 omu_info "Removed $user."

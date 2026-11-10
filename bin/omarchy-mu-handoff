@@ -1,0 +1,93 @@
+#!/bin/bash
+
+# omarchy:summary=Hand the accounts' disk keys and root's holder to Omarchy's own Setup › Users
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# Omarchy PR #16920 brings what this package does for passwords into Omarchy: each
+# account's own key slot, the slot map, root's holder, the disk prompt picking the
+# person and the password-only login screen. Its records have the same format as
+# ours, in /etc/omarchy/users. Once Omarchy ships it (omu_upstream_users), this
+# finishes any change our journal holds, copies the slot map and root's holder there
+# (never over Omarchy's own), and rebuilds the boot image, which then carries
+# Omarchy's cryptsetup wrapper instead of ours. omarchy-mu-login-select and
+# omarchy-mu-sddm-guard step aside by themselves; the FIDO2 keys, fingerprints,
+# migrations, update lock, lock screen and greeter stay with this package.
+#
+# Run by the pacman hook when Omarchy's omarchy-user-helper arrives, and when this
+# package is installed or upgraded. Does nothing before that, or a second time.
+#
+# Usage: omarchy-mu-handoff [--check]
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+# shellcheck source=../lib/omarchy-multiuser/slots.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/slots.sh"
+
+check=false
+[[ ${1:-} == --check ]] && check=true
+note=$OMU_STATE_DIR/handed-over
+up=$OMU_UPSTREAM_USERS_DIR
+
+if ! omu_upstream_users; then
+  ! $check || echo "Omarchy doesn't manage accounts yet; this package does."
+  exit 0
+fi
+if [[ -f $note ]]; then
+  ! $check || echo "Handed over to Omarchy's Setup › Users on $(<"$note")."
+  exit 0
+fi
+if $check; then
+  echo "Omarchy manages accounts now; hand the records over: sudo omarchy-mu-handoff" >&2
+  exit 1
+fi
+
+if (( EUID != 0 )) && [[ -z $OMU_ROOT ]]; then
+  exec sudo "$0" "$@"
+fi
+umask 077
+
+omu_hold_lock slots || omu_die "A password change is in progress; run this again once it's done."
+omu_load_drive || exit 1
+omu_slots_finish || omu_die "Our journal holds a change that can't be finished; nothing was handed over."
+
+install -d -m 755 "${up%/*}" "$up"
+copied=()
+if [[ -s $OMU_SLOT_MAP && ! -e $up/slots ]]; then
+  omu_map_lines | omu_durable_write "$up/slots"
+  copied+=("the key slots of $(omu_map_lines | wc -l) people")
+fi
+holder=$(omu_root_holder)
+if [[ -n $holder && ! -e $up/root ]]; then
+  printf '%s\n' "$holder" | omu_durable_write "$up/root"
+  copied+=("root's holder ($holder)")
+fi
+if [[ -s $OMU_SLOT_LEGACY ]]; then
+  echo "Warning: $(awk '{ print $1 }' "$OMU_SLOT_LEGACY" | paste -sd' ' -) still have disk keys from before 0.10.0, which Omarchy doesn't know; each of them should change their password under Setup › Users." >&2
+fi
+
+# Our wrapper leaves the boot image once Omarchy's is in; both need a rebuild.
+if [[ -f $OMU_SLOT_DIR/boot-records-slot ]]; then
+  rebuild=${OMU_REBUILD_BOOT:-limine-mkinitcpio}
+  command -v "$rebuild" >/dev/null || rebuild="mkinitcpio -P"
+  echo "Updating the boot image for Omarchy's own record of who unlocked the disk..."
+  # shellcheck disable=SC2086  # a command and its option
+  if $rebuild >/dev/null 2>&1; then
+    rm -f "$OMU_SLOT_DIR/boot-records-slot"
+    : | omu_durable_write "$up/boot-records-slot"
+  else
+    echo "Warning: couldn't update the boot image; until it is, the login screen asks who is signing in. Run: sudo limine-mkinitcpio" >&2
+  fi
+fi
+
+[[ -n $OMU_ROOT ]] || "$(dirname "$(readlink -f "$0")")/omarchy-mu-sddm-guard" >/dev/null || true
+install -d -m 755 "$OMU_STATE_DIR"
+date -Iseconds | omu_atomic_write "$note" 644
+if (( ${#copied[@]} )); then
+  printf -v what '%s, ' "${copied[@]}"
+  omu_info "Handed ${what%, } over to Omarchy's Setup › Users."
+else
+  omu_info "Omarchy's Setup › Users manages accounts from now on."
+fi

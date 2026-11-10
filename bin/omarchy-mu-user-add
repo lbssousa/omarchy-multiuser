@@ -6,24 +6,27 @@
 # Omarchy is provisioned for a single owner (omarchy-provision-owner). This
 # adds another account the same way that owner's was finalized: /etc/skel
 # seeds the dotfiles (and marks every existing migration done), the full name
-# goes to GECOS, which the multi-user greeter lists, and Omarchy's per-user
-# provisioning (omarchy-provision-user, as provision-owner's finalize_user
-# runs it) sets the theme, git identity and keyring up before the first login.
-#
-# With a second person on the machine, root's password (the owner's, from
-# omarchy-provision-owner) is locked before the account exists, so a stop
-# part way leaves more protection, not less. The new account gets the lowest
-# UID that owns nothing in /home, and an administrator gets the %wheel sudo
+# goes to GECOS, and Omarchy's per-user provisioning (omarchy-provision-user, as
+# provision-owner's finalize_user runs it) sets the theme, git identity and
+# keyring up before the first login. An administrator also gets the %wheel sudo
 # rule when an ISO install granted the owner sudo by name only, and the watcher
 # that records the migrations it runs.
 #
-# The password is asked here and goes in last: the account stays locked until
-# everything else is done. It is also the account's own key to the disk, and what
-# picks the account at the disk prompt and the login screen, so it must be nobody
-# else's. Adding that key takes your own password.
+# The password is also the account's own key to the disk, and what picks the
+# account at the disk prompt and the login screen, so it must be nobody else's.
+# Adding that key takes your own password. omarchy-mu-user-helper creates the
+# account, its key slot and its password as one journaled change: one that stops
+# part way is undone by the next run. The new account gets the lowest UID that
+# owns nothing in /home.
+#
+# A child (--child, as in Omarchy's PR) is a limited account also in omarchy-child,
+# with no other groups. It starts with the messaging, social and work web apps
+# blocked (Setup › Users › Blocked Apps), its lock screen also opens with an
+# administrator's password, and it gets a local git identity, so its first login
+# asks for none.
 #
 # Usage: omarchy-mu-user-add [<user> --full-name <name>] [--email <address>]
-#                            [--admin] [--shell <path>] [--groups g1,g2]
+#                            [--admin|--child] [--shell <path>] [--groups g1,g2]
 # Without a user name it asks for everything.
 
 set -euo pipefail
@@ -32,14 +35,25 @@ set -euo pipefail
 source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
 
 omu_is_admin || omu_die "Only an administrator can add users."
+
+# Once Omarchy ships its own Setup › Users, its journal and records are the ones
+# that count. What stays ours: who records migrations.
+if omu_upstream_users; then
+  echo "Omarchy manages people's accounts now (Setup › Users)."
+  "$OMU_UPSTREAM_BIN/omarchy-user-add" || exit
+  sudo omarchy-mu-accounts sync-migration-watchers ||
+    echo "Warning: run sudo omarchy-mu-accounts sync-migration-watchers to finish." >&2
+  exit 0
+fi
 omu_hold_lock accounts || omu_die "Another account change is in progress."
 
-user="" full_name="" email="" admin=false shell=/bin/bash groups=""
+user="" full_name="" email="" admin=false child=false shell=/bin/bash groups=""
 while (($#)); do
   case $1 in
     --full-name) full_name=${2:-}; shift 2 ;;
     --email) email=${2:-}; shift 2 ;;
     --admin) admin=true; shift ;;
+    --child) child=true; shift ;;
     --shell) shell=${2:-}; shift 2 ;;
     --groups) groups=${2:-}; shift 2 ;;
     -h|--help) sed -n '3,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
@@ -52,8 +66,14 @@ if [[ -z $user ]]; then
   user=$(gum input --placeholder "username (lowercase)" --header "New user") || exit 1
   full_name=$(gum input --placeholder "Full name, as the login screen shows it" --header "Full name") || exit 1
   email=$(gum input --placeholder "e-mail (optional, for git)" --header "E-mail") || exit 1
-  gum confirm --default=false "Make $user an administrator (wheel)?" && admin=true
+  if gum confirm --default=false "Make $user an administrator (wheel)?"; then
+    admin=true
+  elif gum confirm --default=false "Is $user a child? (blocked apps, an administrator's password opens their lock screen)"; then
+    child=true
+  fi
 fi
+! { $admin && $child; } || omu_die "An account is an administrator or a child, not both."
+! { $child && [[ -n $groups ]]; } || omu_die "A child's account gets no other groups."
 
 [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || omu_die "Invalid user name: $user"
 getent passwd "$user" >/dev/null && omu_die "User $user already exists."
@@ -64,27 +84,24 @@ getent group "$user" >/dev/null && omu_die "A group named $user already exists."
 # It outranks zz-omarchy-multiuser.conf: the first person would keep being logged
 # in automatically, at every boot, with a second one on the machine.
 ! omu_fixed_autologin || omu_die "/etc/sddm.conf logs someone in automatically; remove User= from its [Autologin] section first."
-[[ -n ${full_name//[[:space:]]/} ]] || omu_die "A full name is required (the login screen lists it)."
+[[ -n ${full_name//[[:space:]]/} ]] || omu_die "A full name is required (Switch User shows it)."
 [[ $full_name != *[:,]* && $full_name != *$'\n'* ]] || omu_die "The full name can't contain ':' ',' or line breaks."
 [[ -x $shell ]] || omu_die "No such shell: $shell"
 grep -qx "$shell" /etc/shells || omu_die "$shell is not listed in /etc/shells."
 
-group_list=$OMU_USERS_GROUP
-$admin && group_list+=",$OMU_ADMIN_GROUP"
-[[ -n $groups ]] && group_list+=",$groups"
-
-uid=$(omu_free_uid) || omu_die "No free UID left."
+helper_args=(--full-name "$full_name" --shell "$shell")
+$admin && helper_args+=(--admin)
+$child && helper_args+=(--child)
+# A local identity, so a child's first login doesn't ask for one.
+$child && [[ -z $email ]] && email="$user@localhost"
+[[ -z $groups ]] || helper_args+=(--groups "$groups")
 
 # Before anything changes: a password someone else has stops here.
 new_password=$(omu_ask_new_password "$user's password") || exit 1
 own_password=$(gum input --password --header "Your password ($(id -un)), the current one") || exit 1
 sudo -v
-printf '%s\n' "$new_password" | sudo omarchy-mu-user-helper check-new || exit 1
-
-sudo groupadd -f "$OMU_USERS_GROUP"
-$admin && sudo omarchy-mu-accounts ensure-wheel-sudo
-sudo omarchy-mu-accounts lock-root
-sudo useradd --create-home --uid "$uid" --comment "$full_name" --shell "$shell" --groups "$group_list" "$user"
+printf '%s\n%s\n' "$own_password" "$new_password" | sudo omarchy-mu-user-helper add "${helper_args[@]}" "$user" ||
+  omu_die "$user wasn't added."
 omu_info "Created $user ($full_name)."
 
 home=$(getent passwd "$user" | cut -d: -f6)
@@ -107,8 +124,9 @@ if $admin; then
     echo "Warning: the migrations $user runs won't be recorded; run: sudo omarchy-mu-accounts sync-migration-watchers" >&2
 fi
 
-if ! printf '%s\n%s\n' "$own_password" "$new_password" | sudo omarchy-mu-user-helper password "$user"; then
-  omu_die "$user has no password yet, so nobody can log in as them. Run: omarchy-mu-user-password $user"
+if $child; then
+  sudo runuser -u "$user" -- env HOME="$home" git config --global user.name "$full_name" 2>/dev/null || true
+  sudo runuser -u "$user" -- env HOME="$home" git config --global user.email "$email" 2>/dev/null || true
 fi
 
 omu_info "\n$user can now log in by typing their password, at the disk prompt or the login screen."

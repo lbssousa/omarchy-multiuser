@@ -14,7 +14,8 @@
 # Programs keep the groups they started with, so sudo goes on working in a
 # session already open: it offers to end it. Either way, the migrations this
 # account runs are recorded as an administrator's only while it is one.
-# Refuses to take your own rights away and the last administrator's.
+# Refuses to take your own rights away and the last administrator's. When root's
+# password is theirs, it becomes yours first (omarchy-mu-user-helper root-take).
 #
 # Usage: omarchy-mu-user-admin [<user> [on|off]]
 # Without arguments it asks.
@@ -70,6 +71,10 @@ sync_watchers() {
     echo "Warning: couldn't update who records migrations; run: sudo omarchy-mu-accounts sync-migration-watchers" >&2
 }
 
+if [[ $state == on && $current == off ]] && omu_in_group "$user" "$OMU_CHILD_GROUP"; then
+  omu_die "$user is a child's account. To make them an administrator, take them out of children first: sudo gpasswd -d $user $OMU_CHILD_GROUP"
+fi
+
 if [[ $state == on ]]; then
   # Also for a member already: wheel alone gives no sudo on an install that
   # granted it by name only.
@@ -96,6 +101,15 @@ omu_admins | grep -vx -- "$user" >/dev/null ||
 admin_gid=$(getent group "$OMU_ADMIN_GROUP" | cut -d: -f3)
 [[ $(getent passwd "$user" | cut -d: -f4) != "$admin_gid" ]] ||
   omu_die "$OMU_ADMIN_GROUP is $user's primary group; change it first (sudo usermod -g $user $user)."
+
+# Root's password must not stay with someone outside wheel: it becomes yours first.
+holder=$(sudo omarchy-mu-user-helper root-holder) || omu_die "Couldn't tell whose password root has; nothing changed."
+if [[ $holder == "$user" ]]; then
+  echo "Root's password is $user's; it becomes yours."
+  own_password=$(gum input --password --header "Your password ($(id -un)), the current one") || exit 1
+  printf '%s\n' "$own_password" | sudo omarchy-mu-user-helper root-take ||
+    omu_die "Root's password is still $user's, so $user stays an administrator."
+fi
 
 # The grants go before wheel does: a stop in between leaves an administrator,
 # and running this again finishes.

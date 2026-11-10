@@ -1,0 +1,78 @@
+#!/bin/bash
+
+# omarchy:summary=Choose the apps a person neither sees nor can run
+# omarchy:requires-sudo=true
+#
+# Setup › Users › Blocked Apps, as Omarchy's PR has it under each person. Every
+# package stays installed for the whole machine; the apps chosen here are hidden
+# from this person's launcher and, unless they run through something everyone needs
+# (a web app runs through the browser), denied to them (omarchy-mu-user-apps-apply).
+# For limited accounts and children: an administrator could undo it.
+#
+# Usage: omarchy-mu-user-apps [<user>]
+
+set -euo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+
+omu_is_admin || omu_die "Only an administrator can choose someone's apps."
+
+user=${1:-}
+if [[ -z $user ]]; then
+  mapfile -t candidates < <(while read -r u; do omu_is_admin "$u" || echo "$u"; done < <(omu_human_users))
+  (( ${#candidates[@]} )) || omu_die "Everyone here is an administrator."
+  user=$(gum choose --header "Choose whose apps?" "${candidates[@]}") || exit 1
+fi
+grep -qx -- "$user" <<<"$(omu_human_users)" || omu_die "There is no person's account named $user."
+! omu_is_admin "$user" || omu_die "$user is an administrator, who could undo it."
+
+# Installed apps by desktop id and name, as the launcher lists them; the first
+# directory to hold an id wins, as in XDG lookup.
+declare -A names=() seen=()
+for dir in "$OMU_ROOT/usr/local/share/applications" "$OMU_ROOT/usr/share/applications" "$OMU_ROOT/usr/share/omarchy/applications"; do
+  for file in "$dir"/*.desktop; do
+    [[ -f $file ]] || continue
+    id=${file##*/}
+    id=${id%.desktop}
+    [[ -z ${seen[$id]:-} ]] || continue
+    seen[$id]=1
+    entry=$(awk '/^\[/ { section = $0 } section == "[Desktop Entry]"' "$file")
+    ! grep -qiE '^(NoDisplay|Hidden)=true' <<<"$entry" || continue
+    label=$(awk -F= '$1 == "Name" { sub(/^Name=/, ""); print; exit }' <<<"$entry")
+    [[ -z $label ]] || names[$id]=$label
+  done
+done
+(( ${#names[@]} )) || omu_die "No installed apps found."
+
+# Two apps can share a name; those say which is which.
+declare -A uses=()
+for id in "${!names[@]}"; do uses[${names[$id]}]=$(( ${uses[${names[$id]}]:-0} + 1 )); done
+for id in "${!names[@]}"; do
+  (( ${uses[${names[$id]}]} == 1 )) || names[$id]="${names[$id]} ($id)"
+done
+mapfile -t ids < <(for id in "${!names[@]}"; do printf '%s\t%s\n' "${names[$id]}" "$id"; done | sort -f | cut -f2)
+
+current=$(sudo omarchy-mu-user-helper blocked "$user") || omu_die "Couldn't read $user's blocked apps."
+labels=() selected=()
+for id in "${ids[@]}"; do
+  labels+=("${names[$id]}")
+  ! grep -qxF -- "$id" <<<"$current" || selected+=("${names[$id]}")
+done
+selected_csv=$(IFS=,; echo "${selected[*]}")
+
+chosen=$(gum choose --no-limit --header "Apps $user neither sees nor runs (space marks, Enter saves)" \
+  --selected "$selected_csv" "${labels[@]}") || exit 1
+
+choice_ids=()
+while IFS= read -r label; do
+  [[ -n $label ]] || continue
+  for id in "${ids[@]}"; do
+    [[ ${names[$id]} != "$label" ]] || choice_ids+=("$id")
+  done
+done <<<"$chosen"
+
+own_password=$(gum input --password --header "Your password ($(id -un)), the current one") || exit 1
+{ printf '%s\n' "$own_password"; if (( ${#choice_ids[@]} )); then printf '%s\n' "${choice_ids[@]}"; fi; } |
+  sudo omarchy-mu-user-helper apps "$user" || omu_die "$user's apps didn't change."
+omu_info "$user now has ${#choice_ids[@]} blocked app(s)."

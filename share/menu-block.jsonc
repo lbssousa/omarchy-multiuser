@@ -19,9 +19,11 @@
   "setup.security.passwordless-sudo": {"when":"omarchy-mu-is-admin"},
   "remove.security.sshd": {"when":"omarchy-mu-is-admin && systemctl is-enabled --quiet sshd"},
   "remove.security.sudoless-docker": {"when":"omarchy-mu-is-admin && ! omarchy-sudo-docker --configured"},
-  "update.password.drive": {"when":"omarchy-mu-is-admin"},
+  // Data drives only once each person's password is their own key to the system disk.
+  "update.password.drive": {"when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-drive-password"},
   // The login password is also the account's disk key: plain passwd leaves it behind.
-  "update.password.user": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-password"},
+  // Changed under Setup › Users, as Omarchy's PR does.
+  "update.password.user": {"when":"false"},
   // Removing software drops packages for everyone. What lives in the user's
   // own home (themes, web apps, TUIs, the Windows VM, mise dev envs, Microsoft
   // and Xbox Cloud web apps, the SSH agent) stays theirs.
@@ -52,12 +54,14 @@
   "update.hardware.trackpad": {"when":"omarchy-mu-is-admin"},
   // Everyone, once there is someone to switch to.
   "system.switch-user": {"icon":"󰀙","label":"Switch User","when":"omarchy-mu-user-switch --available","action":"omarchy-mu-user-switch"},
-  // Accounts (administrators only). The menu's search doesn't look at the parent's
-  // `when`, so each entry has its own.
-  "setup.users": {"icon":"","label":"Users","when":"omarchy-mu-is-admin"},
+  // Accounts: everyone changes their own password here, administrators anyone's and
+  // the rest. The menu's search doesn't look at the parent's `when`, so each entry
+  // has its own.
+  "setup.users": {"icon":"","label":"Users"},
   "setup.users.add": {"icon":"","label":"Add User","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-add"},
   "setup.users.remove": {"icon":"","label":"Remove User","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-remove"},
   "setup.users.admin": {"icon":"","label":"Administrator Rights","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-admin"},
-  "setup.users.password": {"icon":"","label":"Change Password","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-password"},
+  "setup.users.apps": {"icon":"","label":"Blocked Apps","when":"omarchy-mu-is-admin","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-apps"},
+  "setup.users.password": {"icon":"","label":"Change Password","action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-password"},
   // This machine's per-user setup (omarchy-setup), when it is installed.
   "setup.omarchy-setup": {"icon":"","label":"Omarchy Setup","when":"command -v omarchy-setup-user","action":"omarchy-launch-floating-terminal-with-presentation omarchy-setup-user"},

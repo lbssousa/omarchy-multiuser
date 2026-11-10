@@ -8,6 +8,7 @@
 
 OMU_SLOT_DIR=${OMU_SLOT_DIR:-$OMU_ROOT/etc/omarchy-multiuser}
 OMU_SLOT_MAP=$OMU_SLOT_DIR/slots
+OMU_ROOT_HOLDER=$OMU_SLOT_DIR/root
 # What omarchy-mu-luks-enroll recorded before each slot had to be the login password.
 OMU_SLOT_LEGACY=$OMU_SLOT_DIR/luks-slots
 OMU_SLOT_JOURNAL=${OMU_SLOT_JOURNAL:-$OMU_STATE_DIR/password-journal}
@@ -16,6 +17,10 @@ OMU_RATE_DIR=${OMU_RATE_DIR:-$OMU_ROOT/run/omarchy-multiuser/rate}
 OMU_LIFECYCLE_DISPATCH=${OMU_LIFECYCLE_DISPATCH:-/usr/bin/omarchy-lifecycle-dispatch}
 OMU_REFUSAL_DELAY=${OMU_REFUSAL_DELAY:-3}
 OMU_MIN_PASSWORD=6
+OMU_BLOCKED_DIR=${OMU_BLOCKED_DIR:-$OMU_STATE_DIR/blocked-apps}
+OMU_BLOCKED_DEFAULT=${OMU_BLOCKED_DEFAULT:-$OMU_SHARE/child-blocked-apps}
+OMU_APPS_APPLY=${OMU_APPS_APPLY:-omarchy-mu-user-apps-apply}
+OMU_DESKTOP_ID='^[A-Za-z0-9._+ -]+$'
 
 omu_say() {
   printf '%s\n' "$*" >&2
@@ -201,6 +206,11 @@ omu_kill_slot() {
   if (( status == 1 )); then
     return 0
   elif (( status != 0 )); then
+    return 1
+  fi
+  # Whatever the records say, never the disk's last key: that locks it for good.
+  if [[ $(omu_drive_slots) == "$1" ]]; then
+    omu_say "Key slot $1 is the disk's last one; refusing to lock the disk for good."
     return 1
   fi
   # With stdin not a terminal it reads a passphrase from there, batch mode or not,
@@ -412,7 +422,7 @@ omu_authenticate() {
   fi
   slot=$(omu_slot_of "$password") || status=$?
   if (( status == 2 )); then
-    omu_say "$caller's password doesn't open the system disk. Make them the same first, with omarchy-drive-password."
+    omu_say "$caller's password doesn't open the system disk. Make them the same first: run omarchy-drive-password in a terminal and give the disk $caller's login password."
     return 1
   elif (( status != 0 )); then
     omu_say "Could not check the password against the system disk."
@@ -427,12 +437,145 @@ omu_authenticate() {
   omu_map_set "$caller" "$slot" && omu_legacy_remove "$caller"
 }
 
+# --- Root's password -----------------------------------------------------------
+
+# Root's password is the installer owner's (omarchy-provision-owner). The holder
+# file names whose it is, so changing that person's password changes root's, and
+# removing them hands root to the administrator who removed them. Every password is
+# its person's alone, so only the holder knows root's.
+
+omu_root_holder() {
+  [[ -f $OMU_ROOT_HOLDER ]] && cat "$OMU_ROOT_HOLDER"
+  true
+}
+
+omu_set_root_holder() {
+  printf '%s\n' "$1" | omu_durable_write "$OMU_ROOT_HOLDER"
+}
+
+# The first change an administrator makes with the password root has records them
+# as its holder. Earlier versions locked root with usermod -L, which keeps the hash
+# behind a '!': that one comes back unlocked, as the installer set it up.
+omu_adopt_root_holder() {
+  local caller=$1 password=$2 hash
+  [[ -z $(omu_root_holder) ]] && omu_is_admin "$caller" || return 0
+  hash=$(omu_shadow_hash root)
+  if omu_password_matches_hash "$password" "$hash"; then
+    omu_set_root_holder "$caller"
+  elif [[ $hash == '!'* ]] && omu_password_matches_hash "$password" "${hash#!}"; then
+    omu_set_passwords "$password" root && omu_set_root_holder "$caller"
+  fi
+}
+
+# Root takes the caller's password and the caller becomes its holder: before the
+# holder stops being an administrator. Shadow first, so a stop in between leaves
+# root with the new holder's password, never with someone outside wheel.
+omu_root_take() {
+  local caller=$1 password=$2
+  omu_authenticate "$caller" "$password" || return 1
+  omu_require_admin "$caller" || return 1
+  omu_adopt_root_holder "$caller" "$password" || return 1
+  [[ $(omu_root_holder) != "$caller" ]] || return 0
+  omu_set_passwords "$password" root && omu_set_root_holder "$caller"
+}
+
+omu_require_admin() {
+  omu_is_admin "$1" && return 0
+  omu_say "Only an administrator can do that."
+  return 1
+}
+
 # --- Operations ----------------------------------------------------------------
 
-# Journals its phase before every step that changes something, keeping old access
-# until its replacement is proven, so omu_slots_finish can roll an interrupted one
-# back (before the account took the new password) or forward (after). Whether the
-# account took it is read from shadow itself, by its fingerprint, not the phase.
+# Each operation journals its phase before every step that changes something,
+# keeping old access until its replacement is proven, so omu_slots_finish can roll
+# an interrupted one back (before the account took the new password) or forward
+# (after). Whether the account took it is read from shadow itself, by its
+# fingerprint, not from the phase.
+
+omu_took_new_password() {
+  [[ -n $(omu_shadow_hash "$1") && $(omu_fingerprint "$1") != "$(omu_journal_get old_fp)" ]]
+}
+
+# omu_slots_add <caller> <name> <admin|limited> <shell> <full name> <extra groups,>
+#               <password> <caller's password>
+omu_slots_add() {
+  local caller=$1 name=$2 role=$3 shell=$4 full_name=$5 extra=$6 password=$7 caller_password=$8
+  local slot=- uid groups group
+  if [[ ! $name =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    omu_say "Use lowercase letters, digits, - and _ for the name, starting with a letter."
+    return 1
+  elif getent passwd "$name" >/dev/null || getent group "$name" >/dev/null; then
+    omu_say "There is already a user or group named $name."
+    return 1
+  elif [[ -e $OMU_HOME_DIR/$name ]]; then
+    # useradd would keep it, owned by whoever it was kept for.
+    omu_say "$OMU_HOME_DIR/$name already exists; move it aside first."
+    return 1
+  elif [[ -z ${full_name//[[:space:]]/} || $full_name == *[:,]* || $full_name == *$'\n'* ]]; then
+    omu_say "A full name is required, without ':' ',' or line breaks."
+    return 1
+  elif [[ ! -x $shell ]] || ! grep -qx -- "$shell" "$OMU_ROOT/etc/shells" 2>/dev/null; then
+    omu_say "$shell is not a login shell listed in /etc/shells."
+    return 1
+  fi
+  case $role in
+    admin) groups=$OMU_USERS_GROUP,$OMU_ADMIN_GROUP ;;
+    limited) groups=$OMU_USERS_GROUP ;;
+    # Nothing else: not input, not docker, none of the owner's groups.
+    child) groups=$OMU_USERS_GROUP,$OMU_CHILD_GROUP ;;
+    *) omu_say "An account is an administrator, limited or a child."; return 1 ;;
+  esac
+  if [[ $role == child && -n $extra ]]; then
+    omu_say "A child's account gets no other groups."
+    return 1
+  fi
+  for group in ${extra//,/ }; do
+    if [[ $group == "$OMU_ADMIN_GROUP" || $group == "$OMU_USERS_GROUP" || $group == "$OMU_CHILD_GROUP" ]] || ! getent group "$group" >/dev/null; then
+      omu_say "Can't add $name to the group $group here."
+      return 1
+    fi
+    groups+=,$group
+  done
+  if omu_fixed_autologin; then
+    omu_say "/etc/sddm.conf logs someone in automatically; remove User= from its [Autologin] section first."
+    return 1
+  fi
+  if omu_encrypted && omu_slot_recorder_present; then
+    omu_say "This machine's boot checks can't take a second person's disk password yet."
+    return 1
+  fi
+  omu_authenticate "$caller" "$caller_password" || return 1
+  omu_require_admin "$caller" || return 1
+  omu_check_new_password "$password" "" || return 1
+  if omu_encrypted; then
+    slot=$(omu_free_slot) || { omu_say "The system disk has no free key slot."; return 1; }
+  fi
+  uid=$(omu_free_uid) || { omu_say "No free UID left."; return 1; }
+  omu_adopt_root_holder "$caller" "$caller_password" || return 1
+  if [[ $role == admin ]]; then
+    omu_ensure_wheel_sudo >&2 || return 1
+  fi
+  getent group "$OMU_USERS_GROUP" >/dev/null || groupadd -f "$OMU_USERS_GROUP" || return 1
+  if [[ $role == child ]]; then
+    getent group "$OMU_CHILD_GROUP" >/dev/null || groupadd -f "$OMU_CHILD_GROUP" || return 1
+  fi
+
+  omu_journal_put op add user "$name" role "$role" uuid "$OMU_UUID" slot "$slot" phase account || return 1
+  useradd --create-home --uid "$uid" --comment "$full_name" --shell "$shell" --groups "$groups" "$name" >&2 ||
+    { omu_slots_finish; return 1; }
+  omu_journal_put old_fp "$(omu_fingerprint "$name")" phase key || return 1
+  if [[ $slot != "-" ]] && ! omu_add_slot "$slot" "$caller_password" "$password"; then
+    omu_say "Could not add $name's password to the system disk."
+    omu_slots_finish
+    return 1
+  fi
+  omu_set_passwords "$password" "$name" || { omu_slots_finish; return 1; }
+  omu_journal_put phase shadow || return 1
+  omu_slots_finish || return 1
+  omu_boot_records_slot
+}
+
 omu_slots_change_password() {
   local caller=$1 name=$2 password=$3 caller_password=$4 slot=- old_slot=-
   local -a accounts=("$name") people
@@ -453,12 +596,11 @@ omu_slots_change_password() {
     old_slot=${old_slot:--}
     slot=$(omu_free_slot) || { omu_say "The system disk has no free key slot."; return 1; }
   fi
-  # With one account root keeps its password, as the installer set it up.
-  if (( ${#people[@]} == 1 )) && [[ $(omu_shadow_hash root) == \$* ]]; then
-    accounts+=(root)
-  fi
+  omu_adopt_root_holder "$caller" "$caller_password" || return 1
+  # Root's holder changes root's password in the same write of shadow.
+  [[ $(omu_root_holder) != "$name" ]] || accounts+=(root)
 
-  omu_journal_put user "$name" uuid "$OMU_UUID" slot "$slot" old_slot "$old_slot" old_fp "$(omu_fingerprint "$name")" phase key || return 1
+  omu_journal_put op password user "$name" uuid "$OMU_UUID" slot "$slot" old_slot "$old_slot" old_fp "$(omu_fingerprint "$name")" phase key || return 1
   if [[ $slot != "-" ]] && ! omu_add_slot "$slot" "$caller_password" "$password"; then
     omu_say "Could not add the new password to the system disk."
     omu_slots_finish
@@ -470,32 +612,64 @@ omu_slots_change_password() {
   omu_boot_records_slot
 }
 
-# Takes the account's key off the disk and out of the records. Key first: a stop
-# in between is finished by running this again, which still knows whose slot it is.
-omu_slots_forget() {
-  local user=$1 slot enabled status=0
-  slot=$(omu_map_slot "$user")
-  [[ -n $slot ]] || slot=$(omu_legacy_slot "$user")
-  if [[ -z $slot ]] || ! omu_encrypted; then
-    omu_map_remove "$user" && omu_legacy_remove "$user"
-    return
+# omu_slots_delete <caller> <name> <caller's password> <yes|no: delete the home>
+# The run only goes forward once journaled: root is handed over first, then the
+# account is locked, its key, map entry and grants go, and the account last.
+omu_slots_delete() {
+  local caller=$1 name=$2 caller_password=$3 delete_home=$4 slot handoff=- enabled status=0
+  if ! grep -qx -- "$name" <<<"$(omu_human_users)"; then
+    omu_say "There is no person's account named $name."
+    return 1
+  elif [[ $name == "$caller" ]]; then
+    omu_say "You can't remove your own account."
+    return 1
   fi
-  omu_slot_enabled "$slot" || status=$?
-  if (( status == 0 )); then
-    enabled=$(omu_drive_slots) || return 1
-    if [[ $enabled == "$slot" ]]; then
-      omu_say "Key slot $slot is the disk's last one; refusing to lock the disk for good."
+  omu_authenticate "$caller" "$caller_password" || return 1
+  omu_require_admin "$caller" || return 1
+  local admins
+  admins=$(omu_admins)
+  if omu_is_admin "$name" && ! grep -vqx -- "$name" <<<"$admins"; then
+    omu_say "$name is the last administrator."
+    return 1
+  fi
+  slot=$(omu_map_slot "$name")
+  [[ -n $slot ]] || slot=$(omu_legacy_slot "$name")
+  # Refused here, before anything changes, as omu_kill_slot would refuse later.
+  if [[ -n $slot ]] && omu_encrypted; then
+    omu_slot_enabled "$slot" || status=$?
+    if (( status == 0 )); then
+      enabled=$(omu_drive_slots) || return 1
+      if [[ $enabled == "$slot" ]]; then
+        omu_say "Key slot $slot is the disk's last one; refusing to lock the disk for good."
+        return 1
+      fi
+    elif (( status != 1 )); then
+      omu_say "Could not read the system disk's key slots."
       return 1
     fi
   fi
-  omu_kill_slot "$slot" || return 1
-  omu_map_remove "$user" && omu_legacy_remove "$user"
+  omu_encrypted || slot=""
+  omu_adopt_root_holder "$caller" "$caller_password" || return 1
+  [[ $(omu_root_holder) != "$name" ]] || handoff=$caller
+
+  omu_journal_put op delete user "$name" uid "$(getent passwd "$name" | cut -d: -f3)" uuid "$OMU_UUID" \
+    slot "${slot:--}" home "$delete_home" root_to "$handoff" phase handoff || return 1
+  if [[ $handoff != "-" ]]; then
+    if ! omu_set_passwords "$caller_password" root || ! omu_set_root_holder "$caller"; then
+      omu_slots_finish
+      return 1
+    fi
+  fi
+  omu_journal_put phase remove || return 1
+  omu_slots_finish
 }
 
 # Finishes whatever the journal says was under way, and succeeds once nothing is.
+# A journal without op= was written before accounts were added and removed here.
 omu_slots_finish() {
-  local user slot old_slot phase uuid
+  local op user slot old_slot phase uuid
   omu_journal_pending || return 0
+  op=$(omu_journal_get op) || op=password
   user=$(omu_journal_get user)
   slot=$(omu_journal_get slot)
   old_slot=$(omu_journal_get old_slot)
@@ -507,9 +681,38 @@ omu_slots_finish() {
     return 1
   fi
 
-  case $phase in
-    key)
-      if [[ -n $(omu_shadow_hash "$user") && $(omu_fingerprint "$user") != "$(omu_journal_get old_fp)" ]]; then
+  case ${op:-password}:$phase in
+    add:account)
+      if getent passwd "$user" >/dev/null; then
+        _omu_userdel "$user" yes || return 1
+      fi
+      omu_journal_clear
+      ;;
+    add:key)
+      if omu_took_new_password "$user"; then
+        omu_journal_put phase shadow && omu_slots_finish
+        return
+      fi
+      if [[ $slot != "-" ]]; then
+        omu_kill_slot "$slot" || return 1
+      fi
+      if getent passwd "$user" >/dev/null; then
+        _omu_userdel "$user" yes || return 1
+      fi
+      omu_journal_clear
+      ;;
+    add:shadow)
+      if [[ $slot != "-" ]]; then
+        omu_map_set "$user" "$slot" || return 1
+      fi
+      # Within the add, so one that stops part way sets the child up too.
+      if [[ $(omu_journal_get role) == child ]]; then
+        omu_setup_child "$user" || return 1
+      fi
+      omu_journal_clear
+      ;;
+    password:key)
+      if omu_took_new_password "$user"; then
         omu_journal_put phase shadow && omu_slots_finish
         return
       fi
@@ -520,7 +723,7 @@ omu_slots_finish() {
       fi
       omu_journal_clear
       ;;
-    shadow)
+    password:shadow)
       if [[ $slot != "-" ]]; then
         omu_map_set "$user" "$slot" || return 1
         if [[ $old_slot != "-" ]]; then
@@ -530,11 +733,151 @@ omu_slots_finish() {
       fi
       omu_journal_clear
       ;;
+    delete:handoff)
+      # Whether root took the new holder's password isn't known, and this run never
+      # had it: root stays locked until that holder's next password change.
+      local root_to
+      root_to=$(omu_journal_get root_to)
+      if [[ $root_to != "-" ]]; then
+        usermod -L root >&2 && omu_set_root_holder "$root_to" || return 1
+        omu_say "Root's password was locked while handing it to $root_to; it comes back with their next password change."
+      fi
+      omu_journal_put phase remove && omu_slots_finish
+      return
+      ;;
+    delete:remove)
+      # Locked first, so nobody can sign in again while the rest goes.
+      if getent passwd "$user" >/dev/null; then
+        usermod -L -e 1 "$user" >&2 || return 1
+        loginctl terminate-user "$user" 2>/dev/null || true
+        pkill -KILL -u "$user" 2>/dev/null || true
+      fi
+      omu_map_remove "$user" && omu_legacy_remove "$user" || return 1
+      if [[ $slot != "-" ]]; then
+        omu_kill_slot "$slot" || return 1
+      fi
+      # The grants must not outlive the account, nor pass to a later one given its UID.
+      omu_drop_grants "$user" "$(omu_journal_get uid)" >&2
+      # Their blocked list, and with it the ACLs naming them, while the name resolves.
+      if [[ -f $OMU_BLOCKED_DIR/$user ]]; then
+        rm -f "$OMU_BLOCKED_DIR/$user" && "$OMU_APPS_APPLY" >&2 || return 1
+      fi
+      if getent passwd "$user" >/dev/null; then
+        _omu_userdel "$user" "$(omu_journal_get home)" || return 1
+      fi
+      omu_journal_clear
+      ;;
     *)
-      omu_say "The password journal records an unknown change ($phase)."
+      omu_say "The password journal records an unknown change ($op, $phase)."
       return 1
       ;;
   esac
+}
+
+# Fails while the account is still there. userdel can remove the account and then
+# fail on its home, which only warns: the home can go by hand.
+_omu_userdel() {
+  local user=$1 home=$2 out
+  local -a args=()
+  [[ $home != yes ]] || args=(--remove)
+  if ! out=$(userdel "${args[@]}" "$user" 2>&1); then
+    printf '%s\n' "$out" >&2
+    getent passwd "$user" >/dev/null && return 1
+    omu_say "Removed $user, but couldn't delete their home; delete it by hand."
+    return 0
+  fi
+  # Omarchy has no local mail, so the warning that there's no spool is noise.
+  grep -v 'mail spool' <<<"$out" >&2 || true
+}
+
+# --- Children ------------------------------------------------------------------
+
+# A child starts with the apps they neither see nor run that Omarchy's PR ships
+# (messaging, social and work web apps), for an administrator to change.
+omu_setup_child() {
+  local name=$1
+  [[ ! -f $OMU_BLOCKED_DIR/$name && -f $OMU_BLOCKED_DEFAULT ]] || return 0
+  grep -v '^#' "$OMU_BLOCKED_DEFAULT" | omu_write_blocked "$name" || return 1
+  "$OMU_APPS_APPLY" >&2 || omu_say "Saved $name's blocked apps, but couldn't stop all of them running."
+}
+
+# The desktop ids on stdin become NAME's blocked list.
+omu_write_blocked() {
+  local name=$1 id
+  local -a ids=()
+  while IFS= read -r id; do
+    id=${id%.desktop}
+    [[ -n $id ]] || continue
+    if [[ ! $id =~ $OMU_DESKTOP_ID ]]; then
+      omu_say "'$id' isn't an app id."
+      return 1
+    fi
+    ids+=("$id")
+  done
+  mkdir -p "$OMU_BLOCKED_DIR" || return 1
+  if (( ${#ids[@]} )); then printf '%s\n' "${ids[@]}"; fi | sort -u | omu_durable_write "$OMU_BLOCKED_DIR/$name"
+}
+
+omu_apps() {
+  local caller=$1 name=$2 caller_password=$3
+  grep -qx -- "$name" <<<"$(omu_human_users)" || { omu_say "There is no person's account named $name."; return 1; }
+  omu_authenticate "$caller" "$caller_password" || return 1
+  omu_require_admin "$caller" || return 1
+  if omu_is_admin "$name"; then
+    omu_say "$name is an administrator, who could undo it."
+    return 1
+  fi
+  omu_write_blocked "$name" || return 1
+  "$OMU_APPS_APPLY" >&2 || { omu_say "Saved $name's blocked apps, but couldn't stop all of them running."; return 1; }
+}
+
+# A child's lock screen also opens with an administrator's password, so a parent
+# can get into a child's locked session; the password is typed where the child sits,
+# which is a cost (README). Answered only for a child, one attempt at a time, and
+# after five misses not at all for two minutes, doubling up to an hour, so it is no
+# cheaper a guess than the login screen. Every answer goes to the auth log.
+omu_adult_check() {
+  local caller=$1 password=$2 uid fd status=0
+  if ! omu_in_group "$caller" "$OMU_CHILD_GROUP"; then
+    omu_say "Only a child's lock screen takes an administrator's password."
+    return 1
+  fi
+  uid=$(getent passwd "$caller" | cut -d: -f3)
+  mkdir -p "$OMU_RATE_DIR" || return 1
+  exec {fd}>>"$OMU_RATE_DIR/adult-check-$uid.lock" && flock -x "$fd" || return 1
+  _omu_adult_check_locked "$caller" "$password" "$uid" || status=$?
+  exec {fd}>&-
+  return "$status"
+}
+
+_omu_adult_check_locked() {
+  local caller=$1 password=$2 uid=$3 state failures=0 until=0 now adult wait
+  state=$OMU_RATE_DIR/adult-check-$uid
+  [[ -f $state ]] && read -r failures until <"$state"
+  [[ $failures =~ ^[0-9]+$ && $until =~ ^[0-9]+$ ]] || { failures=0; until=0; }
+  now=$(date +%s)
+  if (( until > now )); then
+    logger -p auth.notice -t omarchy-mu-user-helper "refused an administrator's password in $caller's session: locked out" 2>/dev/null || true
+    sleep "$OMU_REFUSAL_DELAY"
+    return 1
+  fi
+  while read -r adult; do
+    if omu_password_matches "$password" "$adult"; then
+      rm -f "$state"
+      logger -p auth.notice -t omarchy-mu-user-helper "accepted $adult's password in $caller's session" 2>/dev/null || true
+      return 0
+    fi
+  done < <(omu_admins)
+  failures=$(( failures + 1 ))
+  if (( failures >= 5 )); then
+    wait=$(( 120 << (failures - 5 > 5 ? 5 : failures - 5) ))
+    (( wait <= 3600 )) || wait=3600
+    until=$(( now + wait ))
+  fi
+  printf '%s %s\n' "$failures" "$until" >"$state"
+  logger -p auth.notice -t omarchy-mu-user-helper "refused an administrator's password in $caller's session" 2>/dev/null || true
+  sleep "$OMU_REFUSAL_DELAY"
+  return 1
 }
 
 # --- Boot ------------------------------------------------------------------------

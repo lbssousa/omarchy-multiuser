@@ -2,9 +2,10 @@
 # Shared by the omarchy-mu-* commands. Every system path goes through
 # $OMU_ROOT (empty in production) so the tests can run against a fake tree.
 
-# A helper started as root through sudo/pkexec must not take paths or a PATH
-# from its caller (sudo's env_reset already drops them; this is the backstop).
-if (( EUID == 0 )) && [[ -n ${SUDO_USER:-}${PKEXEC_UID:-} ]]; then
+# A helper started as root through sudo/pkexec, or by PAM (omarchy-mu-login-match),
+# must not take paths or a PATH from its caller (sudo's env_reset already drops
+# them; this is the backstop). The tests set OMU_ROOT as a normal user.
+if (( EUID == 0 )) && [[ -n ${SUDO_USER:-}${PKEXEC_UID:-}${PAM_TYPE:-} ]]; then
   unset "${!OMU_@}"
   export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
 fi
@@ -23,10 +24,22 @@ OMU_SUDOERS_DIR=${OMU_SUDOERS_DIR:-$OMU_ROOT/etc/sudoers.d}
 OMU_HOME_DIR=${OMU_HOME_DIR:-$OMU_ROOT/home}
 OMU_LOGIN_DEFS=${OMU_LOGIN_DEFS:-$OMU_ROOT/etc/login.defs}
 OMU_SHADOW=${OMU_SHADOW:-$OMU_ROOT/etc/shadow}
+OMU_UPSTREAM_BIN=${OMU_UPSTREAM_BIN:-$OMU_ROOT/usr/bin}
+OMU_UPSTREAM_USERS_DIR=${OMU_UPSTREAM_USERS_DIR:-$OMU_ROOT/etc/omarchy/users}
 OMU_ADMIN_GROUP=${OMU_ADMIN_GROUP:-wheel}
 OMU_USERS_GROUP=${OMU_USERS_GROUP:-omarchy-users}
+# Children are limited accounts (omarchy-users) also in omarchy-child, as in Omarchy's PR.
+OMU_CHILD_GROUP=${OMU_CHILD_GROUP:-omarchy-child}
 # shellcheck disable=SC2034  # used by the scripts that source this
 OMU_THEME=omarchy-multiuser
+
+# omu_upstream_users — Omarchy ships its own Setup › Users (PR #16920): its root
+# helper and the SDDM step that picks the automatic login. From then on, the disk
+# key slots, the login screen and the automatic login are Omarchy's, and this
+# package steps aside for them (omarchy-mu-handoff).
+omu_upstream_users() {
+  [[ -x $OMU_UPSTREAM_BIN/omarchy-user-helper && -x $OMU_UPSTREAM_BIN/omarchy-login-select ]]
+}
 
 omu_die() {
   echo -e "\e[31m$*\e[0m" >&2
@@ -51,6 +64,17 @@ omu_is_admin() {
 # Human accounts SDDM would list: uid 1000..59999 with a login shell.
 omu_human_users() {
   getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ { print $1 }'
+}
+
+# omu_role <user> — admin (wheel), child (omarchy-child) or limited.
+omu_role() {
+  if omu_is_admin "$1"; then
+    echo admin
+  elif omu_in_group "$1" "$OMU_CHILD_GROUP"; then
+    echo child
+  else
+    echo limited
+  fi
 }
 
 # The human accounts that are administrators, one per line. A wheel member
@@ -233,4 +257,60 @@ omu_in_group() {
   group=$(getent group "$2") || return 1
   gid=$(getent passwd "$1" | cut -d: -f4)
   [[ -n $gid && $gid == "$(cut -d: -f3 <<<"$group")" ]]
+}
+
+# --- Sudo grants -----------------------------------------------------------------
+
+# omu_ensure_wheel_sudo — write %wheel ALL=(ALL:ALL) ALL (00-omarchy-wheel, what
+# omarchy-provision-owner writes) when it is missing: an ISO install grants the
+# owner sudo by name only, and a second administrator would get none.
+#
+# omu_drop_grants <user> [uid] — delete what gives <user> sudo outside wheel: the
+# installer's NN_<user> grant and omarchy-sudo-passwordless' 99-omarchy-*nopasswd-<uid>
+# rules, which name the UID and would pass to the next account given it; then warn
+# about other sudoers rules naming <user>. The uid is for an account already gone.
+
+omu_ensure_wheel_sudo() {
+  local file=$OMU_SUDOERS_DIR/00-omarchy-wheel
+  [[ -f $file ]] && return 0
+  echo "%$OMU_ADMIN_GROUP ALL=(ALL:ALL) ALL" | omu_atomic_write "$file" 440
+  if [[ -z $OMU_ROOT ]] && ! visudo -cqf "$file"; then
+    rm -f -- "$file"
+    omu_die "visudo rejected $file; not granting $OMU_ADMIN_GROUP sudo."
+  fi
+  echo "Administrators ($OMU_ADMIN_GROUP) can now use sudo."
+}
+
+# The rule archinstall writes for its users, alone in NN_<user>.
+_omu_installer_grant() {
+  local file=$1 user=$2 rules
+  rules=$(grep -vE '^[[:space:]]*(#|$)' "$file") || return 1
+  [[ $rules == "$user ALL=(ALL) ALL" || $rules == "$user ALL=(ALL:ALL) ALL" ]]
+}
+
+omu_drop_grants() {
+  local user=$1 uid=${2:-} file
+  [[ -n $uid ]] || uid=$(getent passwd "$user" | cut -d: -f3)
+  [[ -n $uid ]] || omu_die "No such user: $user"
+
+  for file in "$OMU_SUDOERS_DIR"/[0-9][0-9]_"$user"; do
+    [[ -f $file ]] || continue
+    if _omu_installer_grant "$file" "$user"; then
+      rm -f -- "$file"
+      echo "Removed the installer's sudo grant for $user (${file##*/})."
+    fi
+  done
+  for file in "$OMU_SUDOERS_DIR/99-omarchy-nopasswd-$uid" "$OMU_SUDOERS_DIR/99-omarchy-permanent-nopasswd-$uid"; do
+    if [[ -e $file || -L $file ]]; then
+      rm -f -- "$file"
+      echo "Removed $user's passwordless sudo (${file##*/})."
+    fi
+  done
+
+  for file in "$OMU_SUDOERS_DIR"/* "$OMU_ROOT/etc/sudoers"; do
+    [[ -f $file ]] || continue
+    if grep -vE '^[[:space:]]*#' "$file" | grep -qwF -- "$user"; then
+      echo "Warning: ${file#"$OMU_ROOT"} still names $user; check it with visudo." >&2
+    fi
+  done
 }

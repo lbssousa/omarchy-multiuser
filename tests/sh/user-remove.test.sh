@@ -11,7 +11,11 @@ setup() {
   user_stubs
   printf 'root:x:0:0::/root:/bin/bash\nsddm:x:900:900::/var/lib/sddm:/usr/bin/nologin\nowner:x:1000:1000::/home/owner:/bin/bash\nbob:x:1001:1001::/home/bob:/bin/bash\ncarol:x:1002:1002::/home/carol:/bin/bash\n' >"$T/etc/passwd"
   printf 'wheel:x:998:owner\nomarchy-users:x:950:bob,carol\ndocker:x:970:\n' >"$T/etc/group"
-  printf 'root:!$6$root:1::::::\nowner:$6$owner:1::::::\nbob:$6$bob:1::::::\ncarol:$6$carol:1::::::\n' >"$T/etc/shadow"
+  # Everyone's password is sekret-pw, what gum answers when it has nothing else.
+  {
+    echo 'root:!$6$root:1::::::'
+    for u in owner bob carol; do echo "$u:$(pw_hash sekret-pw):1::::::"; done
+  } >"$T/etc/shadow"
   mkdir -p "$T/home/bob"
 }
 in_passwd() { grep -q "^$1:" "$T/etc/passwd"; }
@@ -20,18 +24,16 @@ call_line() { grep -nF -- "$1" "$T/calls" | head -1 | cut -d: -f1; }
 assert_nothing_changed() {
   in_passwd bob || fail "bob was removed"
   assert_not_contains "$T/calls" userdel
-  assert_not_contains "$T/calls" "omarchy-mu-user-helper forget"
+  assert_not_contains "$T/calls" "usermod -L -e 1 bob"
   assert_not_contains "$T/calls" fprintd-delete
 }
 
-test_a_disk_password_that_stays_keeps_the_account() {
+test_the_wrong_own_password_keeps_the_account() {
   setup
-  echo forget >"$T/helper-fails"
-  echo y >"$T/gum-answers"
+  printf 'y\nnot-mine\n' >"$T/gum-answers"
   omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 && fail "said it removed bob"
-  assert_contains "$T/out" "still opens the disk"
-  in_passwd bob || fail "bob is gone, so nothing says whose keyslot that is"
-  assert_not_contains "$T/calls" userdel
+  assert_contains "$T/out" "isn't owner's password"
+  assert_nothing_changed
 }
 
 on_first_console() {
@@ -39,7 +41,7 @@ on_first_console() {
   mkdir -p "$T/sys/class/tty/tty0"
   echo "$2" >"$T/sys/class/tty/tty0/active"
   echo bob >>"$T/running"
-  printf 'y\ny\n' >"$T/gum-answers"
+  printf 'y\nsekret-pw\ny\n' >"$T/gum-answers"
 }
 
 test_a_desktop_on_the_first_console_leaves_the_login_screen() {
@@ -85,7 +87,8 @@ test_removes_account_and_what_it_leaves_behind() {
   assert_contains "$T/out" "Removed bob."
   assert_not_contains "$T/out" "mail spool"
   assert_no_file "$T/etc/sudoers.d/10_bob"
-  assert_contains "$T/calls" "omarchy-mu-user-helper forget bob"
+  assert_contains "$T/calls" "usermod -L -e 1 bob"
+  assert_no_file "$T/var/lib/omarchy-multiuser/password-journal"
   assert_contains "$T/calls" "fprintd-delete bob"
   assert_contains "$T/calls" "loginctl disable-linger bob"
   assert_contains "$T/calls" "omarchy-mu-apply-lock --quiet"
@@ -187,11 +190,11 @@ test_keeps_a_home_with_an_unfinished_disk_password_change() {
 test_running_programs_are_ended_before_anything_changes() {
   setup
   echo bob >"$T/running"
-  printf 'y\ny\n' >"$T/gum-answers"
+  printf 'y\nsekret-pw\ny\n' >"$T/gum-answers"
   omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
   assert_contains "$T/calls" "has programs running"
   terminate=$(call_line "loginctl terminate-user bob")
-  luks=$(call_line "omarchy-mu-user-helper forget")
+  luks=$(call_line "usermod -L -e 1 bob")
   [[ -n $terminate && $terminate -lt $luks ]] || fail "the keyslot went before the sign-out"
   (( $(call_line "loginctl disable-linger bob") < terminate )) || fail "linger outlived the sign-out"
 }
@@ -199,7 +202,7 @@ test_running_programs_are_ended_before_anything_changes() {
 test_declining_the_sign_out_changes_nothing() {
   setup
   echo bob >"$T/running"
-  printf 'y\nn\n' >"$T/gum-answers"
+  printf 'y\nsekret-pw\nn\n' >"$T/gum-answers"
   omarchy-mu-user-remove bob --keep-home >/dev/null 2>&1 && fail "went on after no"
   assert_nothing_changed
   assert_not_contains "$T/calls" loginctl
@@ -209,7 +212,7 @@ test_programs_that_survive_stop_it_before_anything_changes() {
   setup
   echo bob >"$T/running"
   echo bob >"$T/unkillable"
-  printf 'y\ny\n' >"$T/gum-answers"
+  printf 'y\nsekret-pw\ny\n' >"$T/gum-answers"
   omarchy-mu-user-remove bob --keep-home 2>"$T/err" >/dev/null && fail "went on with programs running"
   assert_contains "$T/calls" "pkill -KILL -u bob"
   assert_contains "$T/err" "nothing was removed"
@@ -222,7 +225,7 @@ test_userdel_failing_leaves_the_account_to_run_again() {
   echo account >"$T/userdel-fails"
   echo y >"$T/gum-answers"
   omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 && fail "said it worked"
-  assert_contains "$T/out" "run this again"
+  assert_contains "$T/out" "Run this again"
   assert_no_file "$T/etc/sudoers.d/10_bob"
   assert_not_contains "$T/calls" apply-lock
   rm "$T/userdel-fails"
@@ -233,17 +236,34 @@ test_userdel_failing_leaves_the_account_to_run_again() {
 
 test_userdel_failing_on_the_home_still_finishes_the_rest() {
   setup
-  # owner is the only one left once bob is gone, so root gets its password back.
-  sed -i '/^carol:/d' "$T/etc/passwd"
-  printf 'root:!$6$root:1::::::\nowner:$6$owner:1::::::\nbob:$6$bob:1::::::\n' >"$T/etc/shadow"
   echo home >"$T/userdel-fails"
   echo y >"$T/gum-answers"
-  SUDO_USER=owner omarchy-mu-user-remove bob --delete-home >"$T/out" 2>&1 && fail "said it worked"
+  omarchy-mu-user-remove bob --delete-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
   ! in_passwd bob || fail "bob is still there"
-  assert_contains "$T/out" "couldn't delete /home/bob"
+  assert_contains "$T/out" "couldn't delete their home"
   assert_contains "$T/calls" "omarchy-mu-apply-lock --quiet"
-  assert_contains "$T/calls" "chpasswd -e"
-  assert_not_contains "$T/out" "Removed bob."
+  assert_no_file "$T/var/lib/omarchy-multiuser/password-journal"
+}
+
+test_root_passes_to_whoever_removes_its_holder() {
+  setup
+  mkdir -p "$T/etc/omarchy-multiuser"
+  echo bob >"$T/etc/omarchy-multiuser/root"
+  echo y >"$T/gum-answers"
+  omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_eq "$(cat "$T/etc/omarchy-multiuser/root")" owner
+  assert_contains "$T/calls" chpasswd
+  (( $(call_line chpasswd) < $(call_line "usermod -L -e 1 bob") )) || fail "root kept bob's password while bob went"
+}
+
+test_root_stays_when_it_was_someone_elses() {
+  setup
+  mkdir -p "$T/etc/omarchy-multiuser"
+  echo owner >"$T/etc/omarchy-multiuser/root"
+  echo y >"$T/gum-answers"
+  omarchy-mu-user-remove bob --keep-home >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_not_contains "$T/calls" chpasswd
+  assert_not_contains "$T/calls" "usermod -L root"
 }
 
 test_watcher_goes_with_the_account() {

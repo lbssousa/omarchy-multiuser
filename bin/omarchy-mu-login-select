@@ -10,7 +10,8 @@
 # an encrypted disk or, with more than one, the account whose key slot unlocked the
 # disk this boot, used once. Anything it can't be sure of shows the login screen.
 # A disk with a token (TPM2, FIDO2, clevis) may have opened with nobody typing a
-# password, so there even the one account needs its slot on record.
+# password, so there even the one account needs its slot on record. Once Omarchy
+# ships its own (omarchy-login-select), this only takes its own drop-in away.
 #
 # Usage: omarchy-mu-login-select [--clear]
 
@@ -30,6 +31,13 @@ autologin() {
     printf '[Autologin]\nUser=%s\nSession=omarchy.desktop\nRelogin=false\n' "$1" >"$managed.tmp" &&
     mv -f "$managed.tmp" "$managed"
 }
+
+# Omarchy's own omarchy-login-select decides once it ships: ours only takes its own
+# drop-in away, which would outrank Omarchy's.
+if omu_upstream_users; then
+  [[ ${1:-} != --clear ]] || rm -f "$managed"
+  exit
+fi
 
 if [[ ${1:-} == --clear ]]; then
   rm -f "$OMU_SDDM_CONF_DIR/autologin.conf" "$managed" || exit 1

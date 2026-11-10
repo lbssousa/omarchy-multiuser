@@ -9,7 +9,8 @@
 # installs get a self-deleting omarchy-provision-autologin-once.service. Who is
 # logged in is omarchy-mu-login-select's to say, at each SDDM start, so this removes
 # both, and checks the result. It also keeps omarchy-mu-login-match first in SDDM's
-# PAM stack, where an upgrade of sddm may leave a new /etc/pam.d/sddm without it.
+# PAM stack, where an upgrade of sddm may leave a new /etc/pam.d/sddm without it,
+# and takes it out once Omarchy ships its own (omarchy-login-match).
 #
 # Run by omarchy-mu-sddm-guard.path when /etc/sddm.conf.d changes and by the
 # pacman hook. Never restarts sddm, which would end every open session.
@@ -28,7 +29,19 @@ problems=0
 # Before the first auth line, whatever its indentation; only an active line counts.
 login_match="auth        [success=die default=ignore] pam_exec.so quiet expose_authtok /usr/bin/omarchy-mu-login-match"
 pam=$OMU_PAM_DIR/sddm
-if [[ -f $pam ]] && ! grep -Eq '^[[:space:]]*auth[[:space:]].*/usr/bin/omarchy-mu-login-match' "$pam"; then
+if omu_upstream_users; then
+  # Omarchy's own omarchy-login-match does the same, and two would check every
+  # password twice.
+  if [[ -f $pam ]] && grep -q '/usr/bin/omarchy-mu-login-match' "$pam"; then
+    if $check; then
+      echo "login-match: ours is still in $pam, next to Omarchy's" >&2
+      problems=1
+    else
+      sed -i '\|/usr/bin/omarchy-mu-login-match|d' "$pam"
+      echo "Took omarchy-mu-login-match out of $pam: Omarchy has its own."
+    fi
+  fi
+elif [[ -f $pam ]] && ! grep -Eq '^[[:space:]]*auth[[:space:]].*/usr/bin/omarchy-mu-login-match' "$pam"; then
   if $check; then
     echo "login-match: not in $pam" >&2
     problems=1

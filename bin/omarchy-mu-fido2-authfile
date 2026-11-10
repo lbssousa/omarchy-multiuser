@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 
 # omarchy:summary=Add or remove the calling user's FIDO2 keys in the shared pam_u2f authfile
 # omarchy:requires-sudo=true
@@ -24,6 +24,11 @@
 # the user's own password, as sudo does.
 
 set -euo pipefail
+(( EUID != 0 )) || PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
+# shellcheck source=../lib/omarchy-multiuser/security.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/security.sh"
+omu_harden "$0" "$@"
+umask 022
 
 # shellcheck source=../lib/omarchy-multiuser/common.sh
 source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"

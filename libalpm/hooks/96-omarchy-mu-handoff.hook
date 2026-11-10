@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/bin/omarchy-user-helper
+
+[Action]
+Description = Handing people's disk keys over to Omarchy's own Setup > Users...
+When = PostTransaction
+Exec = /usr/bin/omarchy-mu-handoff

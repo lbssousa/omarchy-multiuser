@@ -329,30 +329,4 @@ test_ensure_wheel_sudo() {
   assert_eq "$(omarchy-mu-accounts ensure-wheel-sudo)" ""
 }
 
-test_root_locked_with_two_accounts() {
-  setup
-  omarchy-mu-accounts root-sync >/dev/null || fail "exit $?"
-  assert_eq "$(shadow_of root)" '$6$root'   # one account: left alone
-  add_user bob 1001
-  omarchy-mu-accounts root-sync >/dev/null || fail "exit $?"
-  assert_eq "$(shadow_of root)" '!$6$root'
-  omarchy-mu-accounts lock-root >/dev/null || fail "exit $?"
-  assert_eq "$(shadow_of root)" '!$6$root'
-}
-
-test_root_back_to_the_only_admin() {
-  setup
-  add_user bob 1001
-  omarchy-mu-accounts lock-root >/dev/null
-  sed -i '/^bob:/d' "$T/etc/passwd"
-  SUDO_USER=someone omarchy-mu-accounts root-sync >/dev/null
-  assert_eq "$(shadow_of root)" '!$6$root'   # not the caller's account
-  sed -i 's/^wheel:x:998:owner$/wheel:x:998:/' "$T/etc/group"
-  SUDO_USER=owner omarchy-mu-accounts root-sync >/dev/null
-  assert_eq "$(shadow_of root)" '!$6$root'   # not an administrator
-  sed -i 's/^wheel:x:998:$/wheel:x:998:owner/' "$T/etc/group"
-  SUDO_USER=owner omarchy-mu-accounts root-sync >/dev/null
-  assert_eq "$(shadow_of root)" '$6$owner'
-}
-
 run_tests

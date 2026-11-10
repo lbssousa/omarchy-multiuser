@@ -11,3 +11,7 @@
 # Recompute the lock screen's fingerprint PAM after enrolling or deleting
 # prints. Idempotent; its only options are --check and --quiet.
 %omarchy-users ALL=(root) NOPASSWD: /usr/bin/omarchy-mu-apply-lock "", /usr/bin/omarchy-mu-apply-lock --quiet, /usr/bin/omarchy-mu-apply-lock --check
+# A child's lock screen also opens with an administrator's password: the helper
+# answers only for a child, one try at a time, rate limited and logged, and takes
+# the password on stdin.
+%omarchy-child ALL=(root) NOPASSWD: /usr/bin/omarchy-mu-user-helper adult-check

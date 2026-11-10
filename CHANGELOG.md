@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+Closer to Omarchy PR #16920.
+
+- Adding and removing an account are journaled by `omarchy-mu-user-helper`, like a
+  password change: `add` makes the account, its key slot and its password as one change,
+  which the next run undoes if it stopped before the password and finishes if after;
+  `delete` locks the account, then takes its key, map entry, sudo grants and the account,
+  and a stop part way is finished by the next run. `forget` is gone.
+- Removing an account asks for your password, before anything changes.
+- Root's password follows its holder (`/etc/omarchy-multiuser/root`), as in the PR,
+  instead of being locked while there are several people: the holder's password
+  changes take root along, removing the holder hands root to whoever removes them,
+  and taking the holder's administrator rights hands it over first (`root-take`).
+  A root an earlier version locked comes back with its owner's next change.
+  `omarchy-mu-accounts lock-root` and `root-sync` are gone.
+- No record ever takes the disk's last key slot, not even a journal being finished.
+- Ready for Omarchy's own Setup › Users: once its `omarchy-user-helper` and
+  `omarchy-login-select` are installed, `omarchy-mu-handoff` (pacman hook, and on
+  install/upgrade) copies the slot map and root's holder to `/etc/omarchy/users`
+  and rebuilds the boot image with Omarchy's wrapper alone. Login-select, the PAM
+  line, the helper and the account commands step aside for Omarchy's.
+- Menu, as in the PR: *Setup › Users* is there for everyone, with *Change Password*
+  (your own; anyone's for an administrator), and *Update › Password › User* is gone.
+  *Update › Password › Drive Encryption* (`omarchy-mu-drive-password`) leaves the
+  system disk out once each person's password is their own key to it, and says so
+  when no other encrypted drive is left.
+- Children, from the PR: `omarchy-mu-user-add --child` makes an account in
+  `omarchy-child` (and `omarchy-users`), with no other groups and a local git
+  identity. Blocked apps per person (*Setup › Users › Blocked Apps*,
+  `omarchy-mu-user-apps`): an ACL denies each program, again after every upgrade
+  (pacman hook), and the entry is hidden in the person's own launcher. A new child
+  starts with the PR's list. An administrator's password also opens a child's lock
+  screen (`omarchy-mu-user-helper adult-check`, rate limited and logged). Screen time,
+  the Kids themes and the web allowlist wait on Omarchy.
+- The commands root runs without a root password (`omarchy-mu-user-helper`,
+  `omarchy-mu-apply-lock`, `omarchy-mu-fido2-authfile`, `omarchy-mu-login-match`)
+  start only as `bash -p` by their shebang, start again without `BASH_ENV`,
+  `SHELLOPTS`, exported functions and the like, and as root use a fixed `PATH` and
+  umask, as in the PR (`lib/omarchy-multiuser/security.sh`). The `OMU_*` overrides
+  are also ignored under PAM, and by the helper whenever it is root.
+  `omarchy-mu-apply-lock` through sudo no longer takes `OMARCHY_PATH` from its caller.
+
 ## 0.11.1 (2026-11-07)
 
 - Menu: entries the block changes in Omarchy's menu (*Install*, *Update ›
