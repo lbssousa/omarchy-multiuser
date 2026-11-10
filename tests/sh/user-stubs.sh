@@ -14,6 +14,12 @@
 #   $T/sessions      what loginctl lists, as JSON; signing out empties it
 #   $T/busctl-fails  asking SDDM for its login screen fails; otherwise that adds
 #                    a greeter to the first console
+#
+# omarchy-mu-user-helper is the real one, on an unencrypted disk: sudo runs it
+# with SUDO_USER=$ME, and it checks the caller's password against $T/etc/shadow
+# (pw_hash makes one).
+pw_hash() { perl -e 'print crypt($ARGV[0], "\$6\$saltsalt\$")' "$1"; }
+
 user_stubs() {
   mkdir -p "$T/stubs" "$T/etc/sudoers.d" "$T/etc/systemd/system/multi-user.target.wants" "$T/run/lock" "$T/home"
   : >"$T/run/lock/omarchy-mu-accounts.lock"
@@ -72,6 +78,7 @@ while (( $# > 1 )); do
 done
 printf '%s:x:%s:%s::/home/%s:/bin/bash\n' "$1" "$uid" "$uid" "$1" >>"$T/etc/passwd"
 printf '%s:!:20000:0:99999:7:::\n' "$1" >>"$T/etc/shadow"
+mkdir -p "$T/home/$1"
 for g in ${groups//,/ }; do "$T/stubs/gpasswd" -a "$1" "$g"; done
 STUB
   cat >"$T/stubs/userdel" <<'STUB'
@@ -90,7 +97,7 @@ STUB
 #!/bin/bash
 echo "usermod $*" >>"$T/calls"
 [[ $1 == -L ]] || exit 2
-sed -i -E "s/^($2):([^!]?)/\1:!\2/" "$T/etc/shadow"
+sed -i -E "s/^(${*: -1}):([^!]?)/\1:!\2/" "$T/etc/shadow"
 STUB
   cat >"$T/stubs/chpasswd" <<'STUB'
 #!/bin/bash
@@ -105,7 +112,7 @@ if [[ $1 == -l ]]; then
   if [[ -f $T/sudo-l ]]; then cat "$T/sudo-l"; else echo "User $3 is not allowed to run sudo on this host."; fi
   exit 0
 fi
-"$@"
+SUDO_USER=$ME "$@"
 STUB
   cat >"$T/stubs/pgrep" <<'STUB'
 #!/bin/bash
@@ -160,13 +167,6 @@ case $answer in
   *) exit 1 ;;
 esac
 STUB
-  # Reads the passwords like the real one; $T/helper-fails names an action that fails.
-  cat >"$T/stubs/omarchy-mu-user-helper" <<'STUB'
-#!/bin/bash
-echo "omarchy-mu-user-helper $*" >>"$T/calls"
-[[ $1 == forget ]] || cat >>"$T/helper-stdin"
-[[ $(cat "$T/helper-fails" 2>/dev/null) != "$1" ]]
-STUB
   # Nothing to do for the commands that have their own tests, or need hardware.
   local cmd
   for cmd in runuser fprintd-delete omarchy-mu-fido2-authfile omarchy-mu-apply-lock; do
@@ -175,8 +175,9 @@ STUB
   done
   printf '#!/bin/bash\n' >"$T/stubs/sleep"
   : >"$T/gum-answers"
+  echo /bin/bash >"$T/etc/shells"
   chmod +x "$T/stubs/"*
-  export PATH="$T/stubs:$PATH" ME=owner
+  export PATH="$T/stubs:$PATH" ME=owner OMU_SYSTEM_DRIVE='' OMU_REFUSAL_DELAY=0
 }
 
 watcher() { echo "$T/etc/systemd/system/multi-user.target.wants/omarchy-mu-migrate-record@$1.path"; }

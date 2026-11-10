@@ -13,6 +13,13 @@ setup() {
   printf 'root:x:0:0::/root:/bin/bash\nowner:x:1000:1000::/home/owner:/bin/bash\nbob:x:1001:1001::/home/bob:/bin/bash\n' >"$T/etc/passwd"
   printf 'wheel:x:998:owner\nomarchy-users:x:950:owner,bob\ndocker:x:970:\n' >"$T/etc/group"
 }
+demote_ready() {
+  sed -i 's/^wheel:x:998:owner$/wheel:x:998:owner,bob/; s/^omarchy-users:x:950:owner,bob$/omarchy-users:x:950:owner/' "$T/etc/group"
+  printf 'root:%s:1::::::\nowner:%s:1::::::\nbob:%s:1::::::\n' "$(pw_hash bob-pass-1)" "$(pw_hash sekret-pw)" "$(pw_hash bob-pass-1)" >"$T/etc/shadow"
+  mkdir -p "$T/etc/omarchy-multiuser"
+  echo bob >"$T/etc/omarchy-multiuser/root"
+}
+root_hash() { grep '^root:' "$T/etc/shadow" | cut -d: -f2; }
 members() { awk -F: -v g="$1" '$1 == g { print $4 }' "$T/etc/group"; }
 
 test_promote() {
@@ -158,6 +165,34 @@ test_asks_when_not_told() {
   printf 'n\n' >"$T/gum-answers"
   omarchy-mu-user-admin bob >/dev/null 2>&1 && fail "went on after no"
   assert_eq "$(members wheel)" "owner,bob"
+}
+
+test_demoting_roots_holder_hands_root_to_you_first() {
+  setup
+  demote_ready
+  omarchy-mu-user-admin bob off >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_contains "$T/out" "Root's password is bob's"
+  assert_eq "$(cat "$T/etc/omarchy-multiuser/root")" owner
+  assert_contains "$T/calls" chpasswd
+  assert_eq "$(members wheel)" "owner"
+}
+
+test_a_wrong_password_keeps_roots_holder_an_administrator() {
+  setup
+  demote_ready
+  echo not-mine >"$T/gum-answers"
+  omarchy-mu-user-admin bob off >"$T/out" 2>&1 && fail "said it worked"
+  assert_contains "$T/out" "stays an administrator"
+  assert_eq "$(cat "$T/etc/omarchy-multiuser/root")" bob
+  assert_eq "$(members wheel)" "owner,bob"
+}
+
+test_a_child_is_not_made_an_administrator() {
+  setup
+  printf 'omarchy-child:x:951:bob\n' >>"$T/etc/group"
+  omarchy-mu-user-admin bob on 2>"$T/err" && fail "made a child an administrator"
+  assert_contains "$T/err" "child's account"
+  assert_eq "$(members wheel)" "owner"
 }
 
 run_tests

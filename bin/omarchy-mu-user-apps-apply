@@ -1,0 +1,181 @@
+#!/bin/bash
+
+# omarchy:summary=Stop people running the apps on their blocked list, and hide them
+# omarchy:requires-sudo=true
+# omarchy:hidden=true
+#
+# From Omarchy PR #16920 (omarchy-user-apps-apply). Every package stays installed
+# for the whole machine; each person's blocked list
+# (/var/lib/omarchy-multiuser/blocked-apps/<user>, written by omarchy-mu-user-helper
+# apps) names desktop ids they neither see nor run. This denies each one's program,
+# and its own directory, to that person with an ACL that takes read and execute both,
+# so neither running it nor loading it works. A program others depend on (a shell,
+# an interpreter, env, sudo, a browser's launcher, an Omarchy one) is never denied,
+# so an entry that runs through one, a web app say, is hidden only.
+#
+# Omarchy's PR hides the entries in the shell's launcher, which this package can't
+# change. Here a hidden entry is a desktop file of the same id in the person's own
+# ~/.local/share/applications (Hidden=true), written as them; one of theirs already
+# there is set aside and comes back when the app does. Hiding is for the launcher
+# only: the ACL is what keeps a program from running.
+#
+# Run after every change to a list, and by a pacman hook after each transaction,
+# since an upgrade replaces a program and its ACL with it. What it set is recorded,
+# so an app taken off a list, or a person removed, gets their access back.
+#
+# Usage: omarchy-mu-user-apps-apply
+
+set -uo pipefail
+
+# shellcheck source=../lib/omarchy-multiuser/common.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
+# shellcheck source=../lib/omarchy-multiuser/slots.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/slots.sh"
+
+(( EUID == 0 )) || [[ -n $OMU_ROOT ]] || exec sudo "$0" "$@"
+umask 022
+
+state=$OMU_STATE_DIR/blocked-apps.applied
+hidden_state=$OMU_STATE_DIR/blocked-apps.hidden
+desktop_dirs=("$OMU_ROOT/usr/local/share/applications" "$OMU_ROOT/usr/share/applications" "$OMU_ROOT/usr/share/omarchy/applications")
+program_dirs=("$OMU_ROOT/usr/local/bin" "$OMU_ROOT/usr/bin")
+system_roots=("$OMU_ROOT/usr" "$OMU_ROOT/opt")
+
+desktop_file() {
+  local dir
+  for dir in "${desktop_dirs[@]}"; do
+    [[ -f $dir/$1.desktop ]] && { echo "$dir/$1.desktop"; return 0; }
+  done
+  return 1
+}
+
+# The program the entry runs, resolved to the file on disk, or nothing when it
+# runs through something others depend on.
+entry_program() {
+  local exec word="" path="" dir root system=false
+  exec=$(awk -F= '/^\[/ { section = $0 } section == "[Desktop Entry]" && $1 == "Exec" { sub(/^Exec=/, ""); print; exit }' "$1")
+  # Past a leading env and its assignments to the program itself.
+  for word in $exec; do
+    [[ $word == "env" || $word == *=* ]] || break
+  done
+  [[ -n $word ]] || return 1
+  if [[ $word == /* ]]; then
+    path=$OMU_ROOT$word
+  else
+    for dir in "${program_dirs[@]}"; do
+      [[ -x $dir/$word ]] && { path=$dir/$word; break; }
+    done
+  fi
+  [[ -n $path ]] && path=$(readlink -f -- "$path") && [[ -f $path ]] || return 1
+  # Only a program the system installed, never a file in someone's home.
+  for root in "${system_roots[@]}"; do
+    [[ $path == "$root"/* ]] && system=true
+  done
+  [[ $system == true ]] || return 1
+  case ${path##*/} in
+    bash | sh | dash | zsh | fish | env | sudo | pkexec | systemd-run | flatpak | xdg-open | gtk-launch | uwsm* | python* | perl* | ruby* | node | electron* | omarchy-*) return 1 ;;
+  esac
+  echo "$path"
+}
+
+# A program's own directory, where a launcher in /usr/bin often hands off to the
+# real binary (/usr/bin/chromium runs /usr/lib/chromium/chromium): denied with it,
+# or the real one runs by its full path.
+own_dirs() {
+  local name=${1##*/} root dir
+  for root in "${system_roots[@]}"; do
+    for dir in "$root/lib/$name" "$root/$name"; do
+      [[ -d $dir && ! -L $dir ]] && echo "$dir"
+    done
+  done
+}
+
+# "<user> <path>" for every program a list blocks, and its own directory, once each.
+desired() {
+  local list user id file program dir
+  for list in "$OMU_BLOCKED_DIR"/*; do
+    [[ -f $list ]] || continue
+    user=${list##*/}
+    getent passwd "$user" >/dev/null || continue
+    while IFS= read -r id; do
+      [[ $id =~ $OMU_DESKTOP_ID ]] || continue
+      file=$(desktop_file "$id") || continue
+      program=$(entry_program "$file") || continue
+      printf '%s %s\n' "$user" "$program"
+      for dir in $(own_dirs "$program"); do
+        printf '%s %s\n' "$user" "$dir"
+      done
+    done <"$list"
+  done | sort -u
+}
+
+# As the person, in their own ~/.local/share/applications: root never writes where
+# they could have left a link. Blocked ids on stdin.
+hide_for() {
+  local user=$1 home
+  home=$(getent passwd "$user" | cut -d: -f6)
+  [[ -n $home && -d $OMU_ROOT$home ]] || return 0
+  # shellcheck disable=SC2016  # the person's shell expands these
+  runuser -u "$user" -- bash -c '
+    dir=$1/.local/share/applications
+    mark=X-Omarchy-Multiuser-Blocked=true
+    mapfile -t blocked
+    mkdir -p "$dir" || exit 1
+    declare -A want=()
+    for id in "${blocked[@]}"; do
+      [[ -n $id ]] || continue
+      want[$id]=1
+      file=$dir/$id.desktop
+      if [[ -e $file || -L $file ]] && ! grep -qx "$mark" "$file" 2>/dev/null; then
+        [[ -e $file.omu-blocked ]] || mv -f "$file" "$file.omu-blocked"
+      fi
+      printf "[Desktop Entry]\nType=Application\nName=%s\nNoDisplay=true\nHidden=true\n%s\n" "$id" "$mark" >"$file.tmp" &&
+        mv -f "$file.tmp" "$file"
+    done
+    for file in "$dir"/*.desktop; do
+      [[ -f $file ]] && grep -qx "$mark" "$file" || continue
+      id=${file##*/}
+      id=${id%.desktop}
+      [[ -z ${want[$id]:-} ]] || continue
+      rm -f "$file"
+      [[ ! -e $file.omu-blocked ]] || mv -f "$file.omu-blocked" "$file"
+    done
+  ' _ "$OMU_ROOT$home"
+}
+
+mkdir -p "$OMU_STATE_DIR" || exit 1
+want=$(desired)
+had=$([[ -f $state ]] && cat "$state")
+status=0
+
+# Access comes back first for what is no longer blocked.
+while read -r user path; do
+  [[ -n $user ]] || continue
+  grep -qxF -- "$user $path" <<<"$want" && continue
+  [[ -e $path ]] && ! setfacl -x "u:$user" -- "$path" 2>/dev/null && getent passwd "$user" >/dev/null && status=1
+done <<<"$had"
+
+# Then every blocked program is denied again, which also restores one a package
+# upgrade replaced.
+while read -r user path; do
+  [[ -n $user ]] || continue
+  setfacl -m "u:$user:---" -- "$path" || status=1
+done <<<"$want"
+
+{ printf '%s\n' "$want" | grep -v '^$' || true; } | omu_atomic_write "$state" 600 || status=1
+
+# The launcher: everyone with a list, and everyone hidden for before (an emptied
+# list brings their entries back).
+declare -A hide=()
+for list in "$OMU_BLOCKED_DIR"/*; do
+  [[ -f $list ]] && hide[${list##*/}]=1
+done
+if [[ -f $hidden_state ]]; then
+  while read -r user; do [[ -n $user ]] && hide[$user]=1; done <"$hidden_state"
+fi
+for user in "${!hide[@]}"; do
+  getent passwd "$user" >/dev/null || continue
+  { [[ ! -f $OMU_BLOCKED_DIR/$user ]] || grep -E "$OMU_DESKTOP_ID" "$OMU_BLOCKED_DIR/$user" || true; } | hide_for "$user" || status=1
+done
+{ for list in "$OMU_BLOCKED_DIR"/*; do [[ -f $list ]] && echo "${list##*/}"; done; true; } | omu_atomic_write "$hidden_state" 600 || status=1
+exit "$status"

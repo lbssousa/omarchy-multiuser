@@ -12,7 +12,12 @@
 
 set -uo pipefail
 set +x
-[[ -n ${OMU_ROOT:-} ]] || export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
+# PAM runs this as root with PAM's environment: common.sh drops the OMU_*
+# overrides then (PAM_TYPE is set), and PATH is fixed before anything runs.
+(( EUID != 0 )) || PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
+# shellcheck source=../lib/omarchy-multiuser/security.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/security.sh" || exit 1
+omu_harden "$0" "$@"
 umask 077
 
 # shellcheck source=../lib/omarchy-multiuser/common.sh

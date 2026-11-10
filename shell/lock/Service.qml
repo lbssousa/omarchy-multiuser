@@ -662,10 +662,17 @@ Item {
     onPamMessage: root.respondToPasswordPrompt()
 
     onCompleted: function(result) {
+      var typed = root.pendingPassword
       root.pendingPassword = ""
 
       if (root.lockRequested && result === PamResult.Success) {
         root.unlockIfOnScreen()
+        return
+      }
+      // A child's lock screen also opens with an administrator's password; still
+      // "checking" meanwhile, so nothing else starts.
+      if (root.lockRequested && root.childAccount && typed.length > 0) {
+        root.checkAdultPassword(typed)
         return
       }
       root.authenticatingPassword = false
@@ -854,6 +861,48 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.lockActions = LockActions.available(LockActions.parseCapabilities(text))
+    }
+  }
+
+  // A child's account (omarchy-child): their lock screen also takes an
+  // administrator's password, so a parent can get into a child's locked session.
+  // The helper answers through the child's NOPASSWD grant, rate limited and logged,
+  // after the child's own password was refused; the password goes over stdin, never
+  // argv, and both run by absolute path, so nothing on the child's PATH sees it. A
+  // child who can change their own session could still read it (README).
+  property bool childAccount: false
+
+  Process {
+    command: ["id", "-nG"]
+    running: true
+    stdout: StdioCollector {
+      onStreamFinished: root.childAccount = (" " + String(text || "").trim() + " ").indexOf(" omarchy-child ") !== -1
+    }
+  }
+
+  function checkAdultPassword(password) {
+    adultCheck.secret = password
+    adultCheck.running = true
+  }
+
+  Process {
+    id: adultCheck
+    property string secret: ""
+    command: ["/usr/bin/sudo", "-n", "/usr/bin/omarchy-mu-user-helper", "adult-check"]
+    stdinEnabled: true
+    onStarted: {
+      write(secret + "\n")
+      secret = ""
+    }
+    onExited: function(exitCode) {
+      if (root.lockRequested && exitCode === 0) {
+        root.logEvent("adult-unlock")
+        root.unlockIfOnScreen()
+        return
+      }
+      root.authenticatingPassword = false
+      if (!root.lockRequested) return
+      root.handlePasswordFailure()
     }
   }
 

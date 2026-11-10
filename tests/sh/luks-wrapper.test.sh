@@ -85,7 +85,7 @@ test_the_record_goes_where_login_select_looks() {
 }
 
 hooks_for() {
-  OMU_SLOT_MAP_FILE=$1 bash -uc "
+  OMU_SLOT_MAP_FILE=$1 OMU_UPSTREAM_BIN=$T/usr/bin bash -uc "
     HOOKS=($2)
     source '$REPO/etc/mkinitcpio.conf.d/zz-omarchy-mu-luks-slot.conf'
     echo \"\${HOOKS[*]}\"
@@ -99,6 +99,16 @@ test_the_hook_follows_encrypt_only_once_the_map_exists() {
   assert_eq "$(hooks_for "$T/slots" "$line")" "base udev plymouth keyboard block encrypt omarchy-mu-luks-slot filesystems fsck"
   # A systemd initramfs has no encrypt hook to follow.
   assert_eq "$(hooks_for "$T/slots" "base systemd sd-encrypt filesystems")" "base systemd sd-encrypt filesystems"
+}
+
+test_omarchys_own_wrapper_leaves_no_room_for_ours() {
+  : >"$T/slots"
+  line="base udev block encrypt omarchy-luks-slot filesystems"
+  assert_eq "$(hooks_for "$T/slots" "$line")" "$line"
+  mkdir -p "$T/usr/bin"
+  printf '#!/bin/sh\n' >"$T/usr/bin/omarchy-login-select"; chmod +x "$T/usr/bin/omarchy-login-select"
+  line="base udev block encrypt filesystems"
+  assert_eq "$(hooks_for "$T/slots" "$line")" "$line"
 }
 
 run_tests

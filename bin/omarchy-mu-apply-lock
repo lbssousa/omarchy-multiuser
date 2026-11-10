@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 
 # omarchy:summary=Configure lock screen authentication for every user
 # omarchy:requires-sudo=true
@@ -19,6 +19,11 @@
 #   --check   exit 0 when some user has prints, 1 otherwise; change nothing
 
 set -e
+(( EUID != 0 )) || PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
+# shellcheck source=../lib/omarchy-multiuser/security.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/security.sh"
+omu_harden "$0" "$@"
+umask 022
 
 # shellcheck source=../lib/omarchy-multiuser/common.sh
 source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
@@ -52,6 +57,11 @@ if $check; then
   exit
 fi
 
+# Root through sudo copies a resume hook from here into systemd: never from a
+# tree the caller named.
+if (( EUID == 0 )) && [[ -n ${SUDO_USER:-}${PKEXEC_UID:-} ]]; then
+  OMARCHY_PATH=/usr/share/omarchy
+fi
 OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
 pam_dir=$OMU_PAM_DIR
 

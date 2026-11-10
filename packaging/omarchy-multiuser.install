@@ -11,12 +11,13 @@ post_install() {
   /usr/bin/omarchy-mu-sddm-guard || true
   /usr/bin/omarchy-mu-sddm-sync || true
   _enable_update_units
+  /usr/bin/omarchy-mu-handoff || true
   echo ":: Enable the watchers and the per-login unit (omarchy-setup does this):"
   echo "   systemctl enable --now omarchy-mu-sddm-guard.path omarchy-mu-sddm-sync.path omarchy-mu-apply-lock.path"
   echo "   systemctl --global enable omarchy-mu-login.service"
   echo ":: Add users to the omarchy-users group; the login screen changes the next time it shows."
   _warn_passwords
-  echo ":: With several accounts, lock root's password: omarchy-mu-accounts root-sync"
+  echo ":: Root's password follows its holder, the first administrator whose password it is."
   echo ":: Switch user appears after logging out once: an automatic login's desktop can't leave for the login screen."
 }
 
@@ -32,8 +33,15 @@ _warn_passwords() {
 post_upgrade() {
   systemd-tmpfiles --create omarchy-multiuser.conf
   /usr/bin/omarchy-mu-sddm-sync || true
+  /usr/bin/omarchy-mu-handoff || true
   if (( $(vercmp "$2" 0.7.0) < 0 )); then
     _enable_update_units
+  fi
+  # Root is no longer locked with several people: it follows its holder, and a root
+  # an earlier version locked comes back with its owner's next change.
+  if (( $(vercmp "$2" 0.12.0) < 0 )) && [[ $(getent shadow root | cut -d: -f2) == '!$'* ]]; then
+    echo ":: Root's password was locked by an earlier version. It comes back with its owner's"
+    echo "   next change through omarchy-mu-user-password, or now: sudo omarchy-mu-user-helper root-take"
   fi
   if (( $(vercmp "$2" 0.10.0) < 0 )); then
     /usr/bin/omarchy-mu-sddm-guard || true

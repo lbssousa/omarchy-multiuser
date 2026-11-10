@@ -134,7 +134,7 @@ test_only_an_administrator_changes_someone_elses() {
   assert_contains "$T/err" "Only an administrator"
   assert_eq "$(opens "$OWNER")" 0
   printf 'x\n' | omarchy-mu-user-helper check-new 2>/dev/null && fail "bob asked whose password"
-  omarchy-mu-user-helper forget owner 2>/dev/null && fail "bob took the owner's key"
+  printf '%s\n' "$BOB" | omarchy-mu-user-helper delete owner 2>/dev/null && fail "bob took the owner's key"
   assert_eq "$(opens "$OWNER")" 0
 }
 
@@ -192,30 +192,127 @@ test_a_journal_from_another_disk_stops_everything() {
   assert_eq "$(opens "$BOB")" ""
 }
 
-test_forgetting_takes_the_key_with_nobodys_password() {
+journal() { echo "$T/state/password-journal"; }
+fp_of() { printf '%s\n' "$1" | sha256sum | cut -c1-16; }
+add_key() {
+  # shellcheck disable=SC2086  # options, split on purpose
+  printf '%s\n%s' "$OWNER" "$1" | bash -c 'IFS= read -r c; exec cryptsetup luksAddKey -q $OMU_LUKS_PBKDF --key-slot "$1" --key-file <(printf "%s" "$c") "$T/disk" <(cat)' _ "$2"
+}
+
+test_adding_someone_gives_them_an_account_a_key_and_a_password_at_once() {
+  setup
+  printf '%s\ncarol-pass-1\n' "$OWNER" | omarchy-mu-user-helper add --full-name "Carol C" carol 2>"$T/err" || fail "add: $(cat "$T/err")"
+  assert_contains "$T/etc/passwd" "carol:x:1002:"
+  assert_contains "$T/calls" "--groups omarchy-users carol"
+  assert_eq "$(opens carol-pass-1)" 1
+  assert_contains "$map" "$UUID 1 1002 carol "
+  grep -q "^carol:\$6" "$T/etc/shadow" || fail "carol has no password"
+  assert_no_file "$(journal)"
+  assert_eq "$(grep -c '^rebuild' "$T/calls")" 1
+}
+
+test_adding_an_administrator_puts_them_in_wheel() {
+  setup
+  printf '%s\ncarol-pass-1\n' "$OWNER" | omarchy-mu-user-helper add --admin --full-name "Carol C" carol 2>/dev/null || fail "add"
+  assert_contains "$T/calls" "--groups omarchy-users,wheel carol"
+  assert_file "$T/etc/sudoers.d/00-omarchy-wheel"
+}
+
+test_adding_with_a_taken_password_or_name_changes_nothing() {
+  setup
+  printf '%s\n%s\n' "$OWNER" "$OWNER" | omarchy-mu-user-helper add --full-name "Carol C" carol 2>"$T/err" && fail "took the owner's password"
+  assert_contains "$T/err" "already unlocks this computer"
+  printf '%s\ncarol-pass-1\n' "$OWNER" | omarchy-mu-user-helper add --full-name "Bob" bob 2>"$T/err" && fail "took a taken name"
+  printf '%s\ncarol-pass-1\n' "$OWNER" | omarchy-mu-user-helper add --groups wheel --full-name "Carol" carol 2>"$T/err" && fail "wheel through --groups"
+  assert_not_contains "$T/calls" useradd
+  assert_eq "$(opens carol-pass-1)" ""
+}
+
+test_only_an_administrator_adds() {
   setup
   give_bob_a_password
-  omarchy-mu-user-helper forget bob </dev/null || fail "forget"
+  export SUDO_USER=bob
+  printf '%s\ncarol-pass-1\n' "$BOB" | omarchy-mu-user-helper add --full-name "Carol C" carol 2>"$T/err" && fail "bob added someone"
+  assert_contains "$T/err" "Only an administrator"
+}
+
+test_an_add_stopped_before_the_account_took_its_password_is_undone() {
+  setup
+  printf 'carol:x:1002:1002::/home/carol:/bin/bash\n' >>"$T/etc/passwd"
+  printf 'carol:!:1::::::\n' >>"$T/etc/shadow"
+  add_key carol-pass-1 1
+  printf 'op=add\nuser=carol\nuuid=%s\nslot=1\nold_fp=%s\nphase=key\n' "$UUID" "$(fp_of '!')" >"$(journal)"
+  omarchy-mu-user-helper finish </dev/null || fail "finish"
+  assert_eq "$(opens carol-pass-1)" ""
+  assert_not_contains "$T/etc/passwd" "carol:"
+  assert_no_file "$(journal)"
+}
+
+test_an_add_stopped_after_the_password_goes_forward() {
+  setup
+  printf 'carol:x:1002:1002::/home/carol:/bin/bash\n' >>"$T/etc/passwd"
+  printf 'carol:!:1::::::\n' >>"$T/etc/shadow"
+  add_key carol-pass-1 1
+  printf 'carol:carol-pass-1\n' | "$T/stubs/chpasswd"
+  printf 'op=add\nuser=carol\nuuid=%s\nslot=1\nold_fp=%s\nphase=key\n' "$UUID" "$(fp_of '!')" >"$(journal)"
+  omarchy-mu-user-helper finish </dev/null || fail "finish"
+  assert_contains "$map" "$UUID 1 1002 carol "
+  assert_contains "$T/etc/passwd" "carol:"
+}
+
+test_deleting_takes_the_key_the_account_and_its_grants() {
+  setup
+  give_bob_a_password
+  printf 'bob ALL=(ALL) ALL\n' >"$T/etc/sudoers.d/10_bob"
+  printf '%s\n' "$OWNER" | omarchy-mu-user-helper delete bob 2>"$T/err" || fail "delete: $(cat "$T/err")"
   assert_eq "$(opens "$BOB")" ""
-  assert_not_contains "$map" " bob "
   assert_eq "$(opens "$OWNER")" 0
+  assert_not_contains "$map" " bob "
+  assert_not_contains "$T/etc/passwd" "bob:"
+  assert_no_file "$T/etc/sudoers.d/10_bob"
+  assert_contains "$T/calls" "usermod -L -e 1 bob"
+  assert_no_file "$(journal)"
+}
+
+test_deleting_refuses_yourself_the_last_admin_and_a_wrong_password() {
+  setup
+  give_bob_a_password
+  printf '%s\n' "$OWNER" | omarchy-mu-user-helper delete owner 2>"$T/err" && fail "deleted itself"
+  printf 'not-mine\n' | omarchy-mu-user-helper delete bob 2>"$T/err" && fail "took a wrong password"
+  assert_eq "$(opens "$BOB")" 1
+  printf 'wheel:x:998:bob\nomarchy-users:x:950:owner\n' >"$T/etc/group"
+  export SUDO_USER=bob
+  printf '%s\n' "$BOB" | omarchy-mu-user-helper delete owner 2>/dev/null || fail "an admin couldn't delete a limited account"
+  printf 'carol:x:1002:1002::/home/carol:/bin/bash\n' >>"$T/etc/passwd"
+  printf '%s\n' "$BOB" | omarchy-mu-user-helper delete bob 2>"$T/err" && fail "deleted itself, the last admin"
+  true
+}
+
+test_a_delete_stopped_part_way_is_finished_by_the_next_run() {
+  setup
+  give_bob_a_password
+  printf 'op=delete\nuser=bob\nuid=1001\nuuid=%s\nslot=1\nhome=no\nroot_to=-\nphase=remove\n' "$UUID" >"$(journal)"
+  omarchy-mu-user-helper finish </dev/null || fail "finish"
+  assert_eq "$(opens "$BOB")" ""
+  assert_not_contains "$T/etc/passwd" "bob:"
+  assert_no_file "$(journal)"
 }
 
 test_killing_a_slot_doesnt_wait_on_an_open_stdin() {
   setup
   give_bob_a_password
-  # A pipe nobody writes to or closes, as when run from another program.
+  # A pipe nobody closes, as when run from another program: only the line asked for is read.
   mkfifo "$T/open"
   exec 8<>"$T/open"
-  timeout 20 omarchy-mu-user-helper forget bob <&8 2>"$T/err" || fail "exit $?: $(cat "$T/err")"
+  printf '%s\n' "$OWNER" >&8
+  timeout 20 omarchy-mu-user-helper delete bob <&8 2>"$T/err" || fail "exit $?: $(cat "$T/err")"
   assert_eq "$(opens "$BOB")" ""
-  [[ ! -s $T/err ]] || fail "said: $(cat "$T/err")"
 }
 
-test_forgetting_refuses_the_disks_last_key() {
+test_no_record_ever_takes_the_disks_last_key() {
   setup
-  printf '%s %s %s %s %s\n' "$UUID" 0 1001 bob fp >"$T/map" ; mkdir -p "${map%/*}"; mv "$T/map" "$map"
-  omarchy-mu-user-helper forget bob </dev/null 2>"$T/err" && fail "locked the disk for good"
+  printf 'op=delete\nuser=bob\nuid=1001\nuuid=%s\nslot=0\nhome=no\nroot_to=-\nphase=remove\n' "$UUID" >"$(journal)"
+  omarchy-mu-user-helper finish </dev/null 2>"$T/err" && fail "locked the disk for good"
   assert_contains "$T/err" "last one"
   assert_eq "$(opens "$OWNER")" 0
 }
@@ -240,18 +337,64 @@ test_an_unencrypted_machine_only_has_passwords() {
   assert_not_contains "$T/calls" rebuild
 }
 
-test_the_only_account_keeps_root_with_it() {
+root_hash() { grep '^root:' "$T/etc/shadow" | cut -d: -f2; }
+holder() { cat "$T/etc/omarchy-multiuser/root" 2>/dev/null; }
+
+test_roots_holder_takes_root_along_on_a_change() {
   setup
-  sed -i '/^bob:/d' "$T/etc/passwd" "$T/etc/shadow"
   sed -i "s|^root:!:|root:$(hash_of "$OWNER"):|" "$T/etc/shadow"
   helper "$OWNER" new-owner-pass password-self 2>/dev/null || fail "change"
-  assert_eq "$(grep '^root:' "$T/etc/shadow" | cut -d: -f2)" "$(hash_of new-owner-pass)"
+  assert_eq "$(holder)" owner
+  assert_eq "$(root_hash)" "$(hash_of new-owner-pass)"
+  helper new-owner-pass "$BOB" password bob 2>/dev/null || fail "bob's"
+  assert_eq "$(root_hash)" "$(hash_of new-owner-pass)"
 }
 
-test_a_locked_root_stays_locked() {
+test_a_root_locked_by_an_earlier_version_comes_back_to_its_owner() {
+  setup
+  sed -i "s|^root:!:|root:!$(hash_of "$OWNER"):|" "$T/etc/shadow"
+  give_bob_a_password
+  assert_eq "$(holder)" owner
+  assert_eq "$(root_hash)" "$(hash_of "$OWNER")"
+}
+
+test_a_root_nobody_holds_stays_as_it_is() {
   setup
   give_bob_a_password
-  grep -q '^root:!' "$T/etc/shadow" || fail "unlocked root"
+  assert_eq "$(root_hash)" '!'
+  assert_eq "$(holder)" ""
+}
+
+test_deleting_roots_holder_hands_root_to_the_deleter() {
+  setup
+  give_bob_a_password
+  printf 'wheel:x:998:owner,bob\nomarchy-users:x:950:\n' >"$T/etc/group"
+  mkdir -p "$T/etc/omarchy-multiuser"; echo bob >"$T/etc/omarchy-multiuser/root"
+  printf '%s\n' "$OWNER" | omarchy-mu-user-helper delete bob 2>/dev/null || fail "delete"
+  assert_eq "$(holder)" owner
+  assert_eq "$(root_hash)" "$(hash_of "$OWNER")"
+}
+
+test_root_take_moves_root_before_its_holder_leaves_wheel() {
+  setup
+  give_bob_a_password
+  printf 'wheel:x:998:owner,bob\nomarchy-users:x:950:\n' >"$T/etc/group"
+  sed -i "s|^root:!:|root:$(hash_of "$OWNER"):|" "$T/etc/shadow"
+  echo owner >"$T/etc/omarchy-multiuser/root"
+  assert_eq "$(SUDO_USER=bob omarchy-mu-user-helper root-holder)" owner
+  printf '%s\n' "$BOB" | SUDO_USER=bob omarchy-mu-user-helper root-take 2>/dev/null || fail "root-take"
+  assert_eq "$(holder)" bob
+  assert_eq "$(root_hash)" "$(hash_of "$BOB")"
+}
+
+test_a_delete_stopped_after_handing_root_over_locks_it() {
+  setup
+  give_bob_a_password
+  printf 'op=delete\nuser=bob\nuid=1001\nuuid=%s\nslot=1\nhome=no\nroot_to=owner\nphase=handoff\n' "$UUID" >"$(journal)"
+  omarchy-mu-user-helper finish </dev/null 2>/dev/null || fail "finish"
+  assert_contains "$T/calls" "usermod -L root"
+  assert_eq "$(holder)" owner
+  assert_not_contains "$T/etc/passwd" "bob:"
 }
 
 # --- omarchy-mu-login-select ------------------------------------------------------

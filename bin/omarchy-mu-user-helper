@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 
 # omarchy:summary=Root's side of changing passwords: the login and the disk key together
 # omarchy:requires-sudo=true
@@ -8,17 +8,45 @@
 # from the arguments. Passwords come on stdin, one per line, never in argv.
 #
 #   check-new            new password   may this be someone's next password?
+#   add [--admin|--child] [--shell <path>] [--groups g1,g2] --full-name <name> <user>
+#                        caller's password, new password   (administrators): the
+#                        account, its key slot and its password, as one change
 #   password <user>      caller's password, new password   (administrators)
 #   password-self        caller's password, new password   (anyone, for themselves;
 #                        sudoers grants it to omarchy-users without a password, and
 #                        three tries an hour keep it from being a way to test guesses)
-#   forget <user>        take the account's key off the disk   (administrators)
+#   delete <user> [--delete-home]
+#                        caller's password   (administrators): the account, its key,
+#                        its grants; root passes to the caller when it was theirs
+#   apps <user>          caller's password, then the desktop ids <user> neither sees
+#                        nor runs, one per line   (administrators; not for one)
+#   blocked <user>       print <user>'s blocked apps   (administrators)
+#   adult-check          a password   (a child, for their lock screen; sudoers grants
+#                        it to omarchy-child without a password): is it an
+#                        administrator's? Rate limited, and logged
+#   verify               caller's password   (administrators): is it theirs? Before a
+#                        front end changes anything the helper doesn't journal
+#   root-holder          print whose password root has, if anyone's   (administrators)
+#   root-take            caller's password   (administrators): root's password
+#                        becomes the caller's, before its holder leaves wheel
 #   finish               finish a change that stopped part way   (administrators)
 #
-# Usage: omarchy-mu-user-helper check-new|password <user>|password-self|forget <user>|finish
+# Every change is journaled and finished, forward or back, by the next run.
+#
+# Usage: omarchy-mu-user-helper check-new|add …|password <user>|password-self|
+#                               delete <user> [--delete-home]|verify|root-holder|
+#                               root-take|finish
 
 set -euo pipefail
 set +x
+# Reached without a password (password-self, adult-check): no caller's PATH, no
+# caller's environment, and no fake tree (OMU_ROOT is for the tests, which run
+# this as a normal user).
+(( EUID != 0 )) || PATH=/usr/local/sbin:/usr/local/bin:/usr/bin
+# shellcheck source=../lib/omarchy-multiuser/security.sh
+source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/security.sh"
+omu_harden "$0" "$@"
+(( EUID != 0 )) || unset "${!OMU_@}"
 
 # shellcheck source=../lib/omarchy-multiuser/common.sh
 source "$(dirname "$(readlink -f "$0")")/../lib/omarchy-multiuser/common.sh"
@@ -32,6 +60,7 @@ umask 077
 
 caller=${SUDO_USER:-}
 omu_human_users | grep -qx -- "$caller" || omu_die "Run this through sudo, from a person's account."
+role="" shell="" full_name="" groups="" name="" delete_home="" pending="" password=""
 
 require_admin() {
   omu_is_admin "$caller" || omu_die "Only an administrator can do that."
@@ -55,15 +84,32 @@ self_allowed() {
   { [[ -z $recent ]] || printf '%s\n' "$recent"; echo "$now"; } >"$state"
 }
 
-read_secrets() {
+read_own() {
   IFS= read -r caller_password || [[ -n ${caller_password:-} ]] || omu_die "No password given."
+}
+
+read_secrets() {
+  read_own
   IFS= read -r new_password || [[ -n ${new_password:-} ]] || omu_die "No new password given."
 }
+
+# A child's lock screen asks while anything else runs: no lock, no disk.
+if [[ ${1:-} == adult-check ]]; then
+  IFS= read -r password || [[ -n ${password:-} ]] || omu_die "No password given."
+  omu_adult_check "$caller" "$password"
+  exit
+fi
 
 omu_hold_lock slots || omu_die "Another password change is in progress."
 omu_load_drive || exit 1
 
 action=${1:-}
+# Once Omarchy ships its own, one journal: theirs.
+case $action in
+  add|password|password-self|delete|root-take|apps)
+    ! omu_upstream_users || omu_die "Omarchy manages people's accounts now: use Setup › Users."
+    ;;
+esac
 case $action in
   check-new)
     require_admin
@@ -83,15 +129,78 @@ case $action in
     omu_slots_finish
     omu_slots_change_password "$caller" "$caller" "$new_password" "$caller_password"
     ;;
-  forget)
+  add)
     require_admin
-    require_person "${2:-}"
+    shift
+    role=limited shell=/bin/bash full_name="" groups="" name=""
+    while (($#)); do
+      case $1 in
+        --admin) role="admin"; shift ;;
+        --child) role="child"; shift ;;
+        --shell) shell=${2:-}; shift 2 ;;
+        --groups) groups=${2:-}; shift 2 ;;
+        --full-name) full_name=${2:-}; shift 2 ;;
+        -*) omu_die "Unknown option: $1" ;;
+        *) [[ -z $name ]] || omu_die "One user at a time."; name=$1; shift ;;
+      esac
+    done
+    [[ -n $name ]] || omu_die "Usage: omarchy-mu-user-helper add [--admin] [--shell <path>] [--groups g1,g2] --full-name <name> <user>"
+    read_secrets
     omu_slots_finish
-    omu_slots_forget "$2"
+    omu_slots_add "$caller" "$name" "$role" "$shell" "$full_name" "$groups" "$new_password" "$caller_password"
+    ;;
+  delete)
+    require_admin
+    delete_home=no
+    case ${3:-} in
+      "") ;;
+      --delete-home) delete_home=yes ;;
+      *) omu_die "Usage: omarchy-mu-user-helper delete <user> [--delete-home]" ;;
+    esac
+    [[ -n ${2:-} ]] || omu_die "Usage: omarchy-mu-user-helper delete <user> [--delete-home]"
+    read_own
+    # Running it again after a stop: finishing the journal may be the whole job.
+    pending=""
+    if omu_journal_pending && [[ $(omu_journal_get op) == delete ]]; then
+      pending=$(omu_journal_get user)
+    fi
+    omu_slots_finish
+    if [[ $pending == "$2" ]] && ! getent passwd "$2" >/dev/null; then
+      exit 0
+    fi
+    omu_slots_delete "$caller" "$2" "$caller_password" "$delete_home"
+    ;;
+  apps)
+    require_admin
+    [[ -n ${2:-} ]] || omu_die "Usage: omarchy-mu-user-helper apps <user>"
+    read_own
+    omu_slots_finish
+    omu_apps "$caller" "$2" "$caller_password"
+    ;;
+  blocked)
+    require_admin
+    [[ -n ${2:-} ]] || omu_die "Usage: omarchy-mu-user-helper blocked <user>"
+    [[ ${2:-} =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || omu_die "Not a user name: $2"
+    [[ ! -f $OMU_BLOCKED_DIR/$2 ]] || cat "$OMU_BLOCKED_DIR/$2"
+    ;;
+  verify)
+    require_admin
+    read_own
+    omu_authenticate "$caller" "$caller_password"
+    ;;
+  root-holder)
+    require_admin
+    omu_root_holder
+    ;;
+  root-take)
+    require_admin
+    read_own
+    omu_slots_finish
+    omu_root_take "$caller" "$caller_password"
     ;;
   finish)
     require_admin
     omu_slots_finish
     ;;
-  *) omu_die "Usage: omarchy-mu-user-helper check-new|password <user>|password-self|forget <user>|finish" ;;
+  *) omu_die "Usage: omarchy-mu-user-helper check-new|add …|password <user>|password-self|delete <user> [--delete-home]|apps <user>|blocked <user>|adult-check|verify|root-holder|root-take|finish" ;;
 esac

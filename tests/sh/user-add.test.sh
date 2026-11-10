@@ -10,31 +10,66 @@ source "$(dirname "$0")/user-stubs.sh"
 setup() {
   user_stubs
   printf 'root:x:0:0::/root:/bin/bash\nowner:x:1000:1000::/home/owner:/bin/bash\n' >"$T/etc/passwd"
-  printf 'root:$6$root:1::::::\nowner:$6$owner:1::::::\n' >"$T/etc/shadow"
+  printf 'root:%s:1::::::\nowner:%s:1::::::\n' "$(pw_hash mine-pass)" "$(pw_hash mine-pass)" >"$T/etc/shadow"
   printf 'wheel:x:998:owner\nomarchy-users:x:950:\n' >"$T/etc/group"
   mkdir -p "$T/usr/share/sddm/themes/omarchy-multiuser"
   : >"$T/usr/share/sddm/themes/omarchy-multiuser/Main.qml"
   printf 'LANG=pt_BR.UTF-8\n' >"$T/etc/locale.conf"
+  # The new password twice, then the caller's.
+  printf 'bob-pass-1\nbob-pass-1\nmine-pass\n' >"$T/gum-answers"
 }
+journal() { echo "$T/var/lib/omarchy-multiuser/password-journal"; }
 
 shadow_of() { awk -F: -v u="$1" '$1 == u { print $2 ":" $3 }' "$T/etc/shadow"; }
 
-test_the_password_goes_in_after_everything_else() {
+test_the_helper_adds_the_account_and_its_password_as_one_change() {
   setup
   omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_eq "$(grep -E '^(useradd|runuser|omarchy-mu-user-helper) ' "$T/calls" | cut -d' ' -f1,2 | paste -sd,)" \
-    "omarchy-mu-user-helper check-new,useradd --create-home,runuser -u,omarchy-mu-user-helper password"
-  assert_contains "$T/calls" "omarchy-mu-user-helper password bob"
-  # check-new's one password, then the caller's and the new one.
-  assert_eq "$(cat "$T/helper-stdin")" $'sekret-pw\nsekret-pw\nsekret-pw'
+  assert_contains "$T/calls" "useradd --create-home --uid 1001 --comment Bob B --shell /bin/bash --groups omarchy-users bob"
+  # One chpasswd run after the account: the password goes in last.
+  (( $(grep -n '^useradd' "$T/calls" | cut -d: -f1) < $(grep -n '^chpasswd' "$T/calls" | cut -d: -f1) )) || fail "password before the account"
+  (( $(grep -n '^chpasswd' "$T/calls" | cut -d: -f1) < $(grep -n '^runuser' "$T/calls" | cut -d: -f1) )) || fail "setup before the account was whole"
+  assert_no_file "$(journal)"
 }
 
 test_a_password_someone_else_has_stops_before_anything_changes() {
   setup
-  echo check-new >"$T/helper-fails"
+  printf 'mine-pass\nmine-pass\nmine-pass\n' >"$T/gum-answers"
   omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 && fail "added bob"
+  assert_contains "$T/out" "already unlocks this computer"
   assert_not_contains "$T/calls" useradd
   assert_not_contains "$T/calls" usermod
+}
+
+test_the_wrong_own_password_stops_before_anything_changes() {
+  setup
+  printf 'bob-pass-1\nbob-pass-1\nnot-mine\n' >"$T/gum-answers"
+  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 && fail "added bob"
+  assert_contains "$T/out" "isn't owner's password"
+  assert_not_contains "$T/calls" useradd
+}
+
+test_a_password_that_fails_last_takes_the_account_back() {
+  setup
+  printf '#!/bin/bash\necho "chpasswd $*" >>"$T/calls"\nexit 1\n' >"$T/stubs/chpasswd"
+  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 && fail "said it worked"
+  assert_contains "$T/out" "bob wasn't added"
+  assert_not_contains "$T/etc/passwd" "bob:"
+  assert_contains "$T/calls" "userdel --remove bob"
+  assert_no_file "$(journal)"
+  assert_not_contains "$T/calls" runuser
+}
+
+test_an_add_interrupted_before_the_password_is_undone_by_the_next_run() {
+  setup
+  printf 'bob:x:1001:1001::/home/bob:/bin/bash\n' >>"$T/etc/passwd"
+  printf 'bob:!:1::::::\n' >>"$T/etc/shadow"
+  mkdir -p "$(dirname "$(journal)")"
+  printf 'op=add\nuser=bob\nuuid=-\nslot=-\nold_fp=%s\nphase=key\n' \
+    "$(printf '!\n' | sha256sum | cut -c1-16)" >"$(journal)"
+  SUDO_USER=owner omarchy-mu-user-helper finish </dev/null || fail "finish"
+  assert_not_contains "$T/etc/passwd" "bob:"
+  assert_no_file "$(journal)"
 }
 
 test_passwords_are_asked_until_they_match() {
@@ -42,21 +77,14 @@ test_passwords_are_asked_until_they_match() {
   printf 'one-pass\ntwo-pass\ngood-pass\ngood-pass\nmine-pass\n' >"$T/gum-answers"
   omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
   assert_contains "$T/out" "don't match"
-  assert_eq "$(cat "$T/helper-stdin")" $'good-pass\nmine-pass\ngood-pass'
-}
-
-test_a_password_that_fails_last_says_how_to_finish() {
-  setup
-  echo password >"$T/helper-fails"
-  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 && fail "said it worked"
-  assert_contains "$T/out" "omarchy-mu-user-password bob"
+  assert_contains "$T/etc/passwd" "bob:x:"
 }
 
 test_interactive_asks_for_everything() {
   setup
-  printf 'bob\nBob B\n\nn\n' >"$T/gum-answers"
+  printf 'bob\nBob B\n\nn\nn\nbob-pass-1\nbob-pass-1\nmine-pass\n' >"$T/gum-answers"
   omarchy-mu-user-add >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
-  assert_contains "$T/calls" "omarchy-mu-user-helper password bob"
+  assert_contains "$T/etc/passwd" "bob:x:1001:"
 }
 
 test_an_account_can_no_longer_wait_to_choose() {
@@ -80,6 +108,15 @@ test_a_new_administrator_records_migrations() {
   omarchy-mu-user-add bob --full-name "Bob B" --admin >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
   assert_watched bob
   assert_watched owner
+  assert_contains "$T/etc/group" "wheel:x:998:owner,bob"
+  assert_file "$T/etc/sudoers.d/00-omarchy-wheel"
+}
+
+test_adding_records_root_with_its_owner_and_leaves_it_unlocked() {
+  setup
+  omarchy-mu-user-add bob --full-name "Bob B" >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_eq "$(cat "$T/etc/omarchy-multiuser/root")" owner
+  assert_not_contains "$T/calls" "usermod -L root"
 }
 
 test_the_baseline_includes_what_first_setup_marks() {
@@ -144,6 +181,23 @@ test_refuses_a_taken_name_and_non_admins() {
   assert_contains "$T/err" "already exists"
   ME=bob omarchy-mu-user-add carol --full-name "C" 2>"$T/err" && fail "a non-admin added someone"
   assert_contains "$T/err" "Only an administrator"
+  assert_not_contains "$T/calls" useradd
+}
+
+test_a_child_gets_their_group_and_a_local_git_identity() {
+  setup
+  printf 'omarchy-child:x:951:\n' >>"$T/etc/group"
+  omarchy-mu-user-add emma --full-name "Emma" --child >"$T/out" 2>&1 || fail "exit $?: $(cat "$T/out")"
+  assert_contains "$T/calls" "--groups omarchy-users,omarchy-child emma"
+  assert_contains "$T/calls" "git config --global user.email emma@localhost"
+  assert_not_watched emma
+}
+
+test_a_child_is_neither_an_administrator_nor_in_other_groups() {
+  setup
+  omarchy-mu-user-add emma --full-name "Emma" --child --admin 2>"$T/err" && fail "a child administrator"
+  omarchy-mu-user-add emma --full-name "Emma" --child --groups video 2>"$T/err" && fail "a child in video"
+  assert_contains "$T/err" "no other groups"
   assert_not_contains "$T/calls" useradd
 }
 
