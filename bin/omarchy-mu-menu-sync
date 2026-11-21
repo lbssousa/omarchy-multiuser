@@ -15,7 +15,9 @@
 #
 # This keeps share/menu-block.jsonc there between two marker
 # comments, right before the file's closing brace, replacing an older copy and
-# leaving everything else alone. /etc/skel's copy belongs to omarchy-settings,
+# leaving everything else alone. An override of an entry the installed Omarchy
+# doesn't have is left out, so the block can name an entry by its id in both
+# an older and a newer release. /etc/skel's copy belongs to omarchy-settings,
 # so instead of seeding it, omarchy-mu-menu-sync.service (enabled globally)
 # runs this at every login: new users get the block on their first one.
 #
@@ -107,6 +109,13 @@ perl -CSD -MJSON::PP -e '
         print $indent, $json->encode($id), ": ", $out->encode(\%whole), $comma, "\n";
         next;
       }
+    }
+    # An override of an entry this Omarchy does not have (renamed or gone in
+    # another release, like update.timezone, now setup.region.timezone) would
+    # show as its bare id: it is left out. With no Omarchy menu, nothing is.
+    if (%upstream && $line =~ /^\s*"([^"]+)":\s*(\{.*\}),?\s*$/ && !$upstream{$1}) {
+      my $entry = eval { $json->decode($2) };
+      next if ref $entry eq "HASH" && !exists $entry->{label};
     }
     if ($line =~ /^\s*"([^"]+)":\s*\{/ && defined(my $label = $labels->{$1})) {
       $line =~ s{"label":("(?:[^"\\]|\\.)*")}{
