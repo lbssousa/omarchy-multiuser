@@ -26,8 +26,8 @@ if command -v fprintd-list >/dev/null && omarchy-hw-fingerprint 2>/dev/null; the
   if fprintd-list "$USER" 2>&1 | grep -qi 'has no fingers enrolled' &&
     omarchy-done ensure mu-fingerprint-invitation; then
     omarchy-notification-wait || true
-    omarchy-notification-send -u normal -g 󰈷 "Setup Fingerprint Reader" \
-      "Use your fingerprint for sudo and unlocking." \
+    omarchy-notification-send -u normal -g 󰈷 "$(omarchy-i18n firstRun.fingerprintTitle)" \
+      "$(omarchy-i18n firstRun.fingerprintBody)" \
       --exec omarchy-launch-floating-terminal-with-presentation omarchy-mu-setup-security-fingerprint || true
   fi
 fi

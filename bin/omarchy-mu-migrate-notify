@@ -64,7 +64,10 @@ notify_administrator() {
     updates_running || break
   done
 
-  omarchy-notification-send -u critical -g  "$(omarchy-i18n migrate.pending)" "$message" \
+  # Transient, because this runs at every login while migrations are pending:
+  # restoring the last login's reminder next to the new one would stack a copy
+  # per login.
+  omarchy-notification-send -u critical --transient -g  "$(omarchy-i18n migrate.pending)" "$message" \
     --exec omarchy-launch-floating-terminal-with-presentation omarchy-mu-migrate && return 0
 
   echo "Omarchy has pending migrations. Run omarchy-mu-migrate in a terminal to apply them:" >&2
@@ -81,7 +84,7 @@ status=$?
 
 if (( status == 1 )); then
   omarchy-notification-wait || true
-  omarchy-notification-send -u critical -g  "Omarchy Migrations" \
+  omarchy-notification-send -u critical --transient -g  "Omarchy Migrations" \
     "A migration failed for your account. Details are in ~/.local/state/omarchy-multiuser/migrate.log; an administrator may need to look at it." \
     --exec omarchy-launch-floating-terminal-with-presentation omarchy-mu-migrate || true
 fi

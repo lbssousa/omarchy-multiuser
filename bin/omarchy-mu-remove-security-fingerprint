@@ -33,6 +33,12 @@ if [[ ${1:-} == --all ]]; then
   fi
   remove_pam_config
   sudo omarchy-mu-apply-lock --quiet
+  # A platform that turned its reader on for setup turns it off again. Failing to
+  # doesn't stop the removal, but the admin is told the reader may stay on.
+  if ! disable_hook=$(omarchy-lifecycle-dispatch --resolve disable-fingerprint) ||
+    { [[ -n $disable_hook ]] && ! sudo omarchy-lifecycle-dispatch disable-fingerprint; }; then
+    echo -e "\e[33mThe fingerprint reader may still be turned on at the next boot.\e[0m"
+  fi
   echo "Removing fingerprint packages..."
   omarchy-pkg-drop fprintd libfprint libfprint-git
   echo -e "\e[32mFingerprint authentication has been removed from this machine.\e[0m"
@@ -40,6 +46,16 @@ if [[ ${1:-} == --all ]]; then
 fi
 
 echo -e "\e[32mRemoving your fingerprints.\n\e[0m"
-fprintd-delete "$USER"
+# A match-on-chip reader (Touch ID among them) keeps the prints in the device as
+# well, and fprintd deletes them there too. fprintd finds no reader when it is
+# off or unplugged: then nothing could be deleted from it, which is said
+# plainly rather than as a failure.
+if ! delete_output=$(fprintd-delete "$USER" 2>&1); then
+  if [[ $delete_output == *"No devices available"* ]]; then
+    echo -e "\e[33mNo fingerprint reader is available now, so any fingerprints stored on the reader itself stay there.\e[0m"
+  else
+    omu_die "Your fingerprints may not have been deleted: $(tail -n 1 <<<"$delete_output")"
+  fi
+fi
 sudo -n omarchy-mu-apply-lock --quiet || true
 echo -e "\e[32mYour saved fingerprints have been removed.\e[0m"
