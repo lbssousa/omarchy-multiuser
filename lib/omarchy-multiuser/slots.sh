@@ -882,22 +882,37 @@ _omu_adult_check_locked() {
 
 # --- Boot ------------------------------------------------------------------------
 
+# The command that rebuilds the boot images: Omarchy's omarchy-boot-rebuild,
+# which covers Limine and systemd-boot alike (omacom/omarchy#19667, once it
+# ships), else Limine's own tool, else plain mkinitcpio. OMU_REBUILD_BOOT
+# overrides it (tests).
+omu_rebuild_boot_command() {
+  local candidate
+  for candidate in ${OMU_REBUILD_BOOT:-omarchy-boot-rebuild limine-mkinitcpio}; do
+    if command -v "$candidate" >/dev/null; then
+      echo "$candidate"
+      return
+    fi
+  done
+  echo "mkinitcpio -P"
+}
+
 # The boot image picks up the hook that records which slot unlocked the disk once
 # the map exists (zz-omarchy-mu-luks-slot.conf), so it is rebuilt the first time
 # there is more than one person. Until it is, every boot shows the login screen,
 # which is safe.
 omu_boot_records_slot() {
-  local marker=$OMU_SLOT_DIR/boot-records-slot rebuild=${OMU_REBUILD_BOOT:-limine-mkinitcpio}
+  local marker=$OMU_SLOT_DIR/boot-records-slot rebuild
   local -a people
   omu_encrypted && [[ ! -f $marker ]] || return 0
   mapfile -t people < <(omu_human_users)
   (( ${#people[@]} > 1 )) || return 0
-  command -v "$rebuild" >/dev/null || rebuild="mkinitcpio -P"
+  rebuild=$(omu_rebuild_boot_command)
   omu_say "Updating the boot image so the computer knows whose password unlocked it..."
   # shellcheck disable=SC2086  # a command and its option
   if $rebuild >/dev/null 2>&1; then
     : | omu_durable_write "$marker"
   else
-    omu_say "Could not update the boot image, so the computer shows the login screen after the disk prompt. Run: sudo limine-mkinitcpio"
+    omu_say "Could not update the boot image, so the computer shows the login screen after the disk prompt. Run: sudo $rebuild"
   fi
 }

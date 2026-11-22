@@ -86,6 +86,34 @@ test_the_boot_image_is_rebuilt_once_for_a_second_person() {
   assert_eq "$(grep -c '^rebuild' "$T/calls")" 1
 }
 
+# omarchy-boot-rebuild (Limine or systemd-boot) first, then Limine's tool, then
+# plain mkinitcpio.
+test_the_boot_image_is_rebuilt_with_omarchys_command_when_there_is_one() {
+  local bin=$T/rebuild-bin
+  mkdir -p "$bin"
+  (
+    # shellcheck source=../../lib/omarchy-multiuser/slots.sh
+    source "$(dirname "$0")/../../lib/omarchy-multiuser/common.sh"
+    source "$(dirname "$0")/../../lib/omarchy-multiuser/slots.sh"
+    unset OMU_REBUILD_BOOT
+    PATH=$bin:/usr/bin:/bin
+    hash -r
+    if ! command -v mkinitcpio >/dev/null && ! command -v limine-mkinitcpio >/dev/null; then
+      assert_eq "$(omu_rebuild_boot_command)" "mkinitcpio -P"
+    fi
+    printf '#!/bin/sh\n' >"$bin/limine-mkinitcpio"
+    chmod +x "$bin/limine-mkinitcpio"
+    hash -r
+    assert_eq "$(omu_rebuild_boot_command)" limine-mkinitcpio
+    printf '#!/bin/sh\n' >"$bin/omarchy-boot-rebuild"
+    chmod +x "$bin/omarchy-boot-rebuild"
+    hash -r
+    assert_eq "$(omu_rebuild_boot_command)" omarchy-boot-rebuild
+    OMU_REBUILD_BOOT=$bin/limine-mkinitcpio
+    assert_eq "$(omu_rebuild_boot_command)" "$bin/limine-mkinitcpio"
+  ) || fail "rebuild command"
+}
+
 test_changing_a_password_replaces_the_old_key() {
   setup
   give_bob_a_password
