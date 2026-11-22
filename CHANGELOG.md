@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The boot image that records whose password unlocked the disk is rebuilt with
+  Omarchy's `omarchy-boot-rebuild` when it is there, which covers systemd-boot as
+  well as Limine (Omarchy's move to systemd-boot, omacom/omarchy#19667), then with
+  `limine-mkinitcpio`, then plain `mkinitcpio -P`. The message after a failed
+  rebuild names the command that was tried.
+
 ## 0.13.0 (2026-11-22)
 
 Based on Omarchy 4.5.0 (`upstream/` was 4.5.0rc1, the lock screen rc3).

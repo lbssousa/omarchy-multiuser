@@ -70,15 +70,14 @@ fi
 
 # Our wrapper leaves the boot image once Omarchy's is in; both need a rebuild.
 if [[ -f $OMU_SLOT_DIR/boot-records-slot ]]; then
-  rebuild=${OMU_REBUILD_BOOT:-limine-mkinitcpio}
-  command -v "$rebuild" >/dev/null || rebuild="mkinitcpio -P"
+  rebuild=$(omu_rebuild_boot_command)
   echo "Updating the boot image for Omarchy's own record of who unlocked the disk..."
   # shellcheck disable=SC2086  # a command and its option
   if $rebuild >/dev/null 2>&1; then
     rm -f "$OMU_SLOT_DIR/boot-records-slot"
     : | omu_durable_write "$up/boot-records-slot"
   else
-    echo "Warning: couldn't update the boot image; until it is, the login screen asks who is signing in. Run: sudo limine-mkinitcpio" >&2
+    echo "Warning: couldn't update the boot image; until it is, the login screen asks who is signing in. Run: sudo $rebuild" >&2
   fi
 fi
 
