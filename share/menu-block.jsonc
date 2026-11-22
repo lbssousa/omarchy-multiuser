@@ -49,7 +49,10 @@
   "update.channel": {"when":"omarchy-mu-is-admin"},
   "update.kernel": {"when":"omarchy-mu-is-admin && (( $(omarchy-kernel list | wc -l) > 1 ))"},
   "update.firmware": {"when":"omarchy-mu-is-admin"},
+  // Omarchy 4.5.0 has it under Update; later releases moved it to Setup > Region,
+  // whose Language and Formats stay each person's own.
   "update.timezone": {"when":"omarchy-mu-is-admin"},
+  "setup.region.timezone": {"when":"omarchy-mu-is-admin"},
   "update.time": {"when":"omarchy-mu-is-admin"},
   "update.config.plymouth": {"when":"omarchy-mu-is-admin"},
   "update.hardware.trackpad": {"when":"omarchy-mu-is-admin"},
