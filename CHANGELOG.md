@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 (2026-11-22)
 
 Based on Omarchy 4.5.0 (`upstream/` was 4.5.0rc1, the lock screen rc3).
 
