@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Timezone stays an administrator's setting on newer Omarchy.** Omarchy moved
+  it from Update to Setup › Region (`setup.region.timezone`), where it was open to
+  everyone, and the old `update.timezone` override showed for administrators as a
+  bare `update.timezone` row. The block now gates both ids, and
+  `omarchy-mu-menu-sync` leaves out an override of an entry the installed Omarchy
+  doesn't have, so one block fits 4.5.0 and later releases.
+
 ## 0.12.1 (2026-11-10)
 
 - **Switching users no longer asks the person the disk prompt logged in to log out

@@ -50,6 +50,13 @@ test_admin_gates_keep_upstream_conditions() {
       .filter(l => !/^\s*\/\//.test(l)).join("\n").replace(/,(\s*})/g, "$1"))
     const upstream = parse(process.argv[1])
     const block = parse(process.argv[2])
+    // Entries Omarchy renamed: the block gates both ids, for older and newer
+    // releases, and menu-sync leaves out the one the installed menu lacks.
+    const renamed = { "update.timezone": "setup.region.timezone" }
+    for (const pair of Object.entries(renamed)) {
+      if (!pair.some(id => upstream[id])) continue
+      for (const id of pair) if (!upstream[id]) delete block[id]
+    }
     let bad = []
     for (const [id, entry] of Object.entries(block)) {
       const m = /^omarchy-mu-is-admin(?: && (.*))?$/.exec(entry.when || "")
@@ -135,6 +142,21 @@ fake_upstream() {
 JSON
   printf '{"install":{"label":"Instalar"},"update.omarchy":{"label":"Omarchy"}}\n' >"$T/i18n/pt-BR/menu.json"
   export OMU_UPSTREAM_MENU=$T/upstream.jsonc OMU_UPSTREAM_I18N=$T/i18n
+}
+
+# An override of an entry this Omarchy lacks would show its bare id: left out.
+test_leaves_out_overrides_of_missing_entries() {
+  fake_upstream
+  omarchy-mu-menu-sync "$T/menu.jsonc"
+  valid_jsonc "$T/menu.jsonc"
+  assert_not_contains "$T/menu.jsonc" '"update.timezone"'
+  assert_not_contains "$T/menu.jsonc" '"setup.region.timezone"'
+  # The block's own entries, with a label, are kept.
+  assert_contains "$T/menu.jsonc" '"label":"Add User"'
+  printf '{\n  "update.timezone": {"icon":"T","label":"Timezone","action":"stock"},\n}\n' >"$T/upstream.jsonc"
+  omarchy-mu-menu-sync "$T/menu.jsonc"
+  assert_contains "$T/menu.jsonc" '"update.timezone": {"action":"stock","icon":"T","label":"Timezone","when":"omarchy-mu-is-admin"},'
+  assert_not_contains "$T/menu.jsonc" '"setup.region.timezone"'
 }
 
 test_overrides_are_written_whole() {
