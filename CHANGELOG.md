@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+Based on Omarchy 4.5.0 (`upstream/` was 4.5.0rc1, the lock screen rc3).
+
+- The lock screen keeps Omarchy 4.5.0's two resume fixes: after a resume it waits
+  15 seconds, not 5, before blanking, so the lock no longer goes dark just as the
+  panel lights; and the password field takes the focus back after a VT switch
+  (NVIDIA forces one around every suspend), so typing no longer goes nowhere.
+- Enrolling a fingerprint walks through it as Omarchy 4.5.0 does: instructions for a
+  press or a swipe sensor, each step and retry spelled out, and Touch ID's duplicate
+  check not counted as a step. An administrator's setup turns on a reader its
+  platform keeps off (Omarchy's `enable-fingerprint` hook); `--all` turns it off
+  again.
+- Removing your fingerprints with no reader available (off, unplugged) says so
+  instead of failing.
+- The pending-migrations reminder, and the failed-migration one, are transient: one
+  per login, not a copy of each earlier login's next to it.
+- The fingerprint invitation at login is in Omarchy's language.
+- Update › Kernel, new in Omarchy 4.5.0, is for administrators: it sets the kernel
+  the machine boots.
 - **Timezone stays an administrator's setting on newer Omarchy.** Omarchy moved
   it from Update to Setup › Region (`setup.region.timezone`), where it was open to
   everyone, and the old `update.timezone` override showed for administrators as a

@@ -44,9 +44,10 @@
   "remove.development.php.php": {"when":"omarchy-mu-is-admin && ([[ -d $HOME/.local/share/mise/installs/php ]] || omarchy-pkg-present php)"},
   "remove.development.php.symfony": {"when":"omarchy-mu-is-admin && omarchy-pkg-present symfony-cli"},
   "remove.development.ocaml": {"when":"omarchy-mu-is-admin && [[ -d $HOME/.opam ]]"},
-  // The machine's clock, time zone, release channel, firmware, boot splash
-  // and trackpad driver.
+  // The machine's clock, time zone, release channel, boot kernel, firmware,
+  // boot splash and trackpad driver.
   "update.channel": {"when":"omarchy-mu-is-admin"},
+  "update.kernel": {"when":"omarchy-mu-is-admin && (( $(omarchy-kernel list | wc -l) > 1 ))"},
   "update.firmware": {"when":"omarchy-mu-is-admin"},
   // Omarchy 4.5.0 has it under Update; later releases moved it to Setup > Region,
   // whose Language and Formats stay each person's own.
