@@ -11,9 +11,9 @@
 #     admin, who gets them set up as upstream does;
 #   - the lock screen's PAM is decided by omarchy-mu-apply-lock: on while any
 #     user has prints;
-#   - fprintd present means the reader's driver is already installed, so the
-#     libfprint-git install is skipped (it would replace a custom libfprint,
-#     such as omarchy-setup's goodix538d build).
+#   - only missing packages are installed, and libfprint-git only when no
+#     libfprint is there at all (it would replace a custom libfprint, such as
+#     omarchy-setup's goodix538d build).
 
 set -e
 
@@ -149,9 +149,18 @@ fi
 if omarchy-pkg-missing fprintd usbutils >/dev/null 2>&1; then
   omu_is_admin || omu_die "The fingerprint service isn't installed. Ask an administrator to run omarchy-mu-setup-security-fingerprint first."
   echo "Installing required packages..."
-  # Same transaction as upstream: --ask 4 accepts libfprint-git replacing
-  # libfprint in one go.
-  sudo pacman -S --needed --noconfirm --ask 4 -- libfprint-git fprintd usbutils
+  # Only what's missing. libfprint-git goes in only when no libfprint is
+  # installed at all: --needed doesn't stop a repo package from replacing a
+  # newer local build of the same name (omarchy-setup's goodix538d fork is
+  # libfprint-git at epoch 2), so asking for it would downgrade the driver.
+  # Same transaction as upstream otherwise: --ask 4 accepts libfprint-git
+  # replacing stock libfprint in one go.
+  packages=()
+  for pkg in fprintd usbutils; do
+    if omarchy-pkg-missing "$pkg" >/dev/null 2>&1; then packages+=("$pkg"); fi
+  done
+  if ! pacman -T libfprint >/dev/null; then packages=(libfprint-git "${packages[@]}"); fi
+  sudo pacman -S --needed --noconfirm --ask 4 -- "${packages[@]}"
 fi
 
 # A reader its platform keeps off until the owner agrees (a Mac's Touch ID)
