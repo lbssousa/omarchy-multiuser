@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 (2026-11-23)
 
+- **Setting up the fingerprint reader no longer replaces a custom libfprint.** With
+  `fprintd` or `usbutils` missing, `omarchy-mu-setup-security-fingerprint` asked
+  pacman for `libfprint-git` too, and `--needed` doesn't keep a newer local build
+  of the same name: omarchy-setup's goodix538d fork was downgraded to the repo's
+  build and the Goodix 538d reader disappeared from fprintd. Only the missing
+  packages are installed now, and `libfprint-git` only when no libfprint is.
 - The boot image that records whose password unlocked the disk is rebuilt with
   Omarchy's `omarchy-boot-rebuild` when it is there, which covers systemd-boot as
   well as Limine (Omarchy's move to systemd-boot, omacom/omarchy#19667), then with
