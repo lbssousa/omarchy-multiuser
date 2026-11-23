@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.1 (2026-11-23)
 
 - **The lock screen lights the panel again after a resume.** A lock that blanked
   the panel before a suspend stayed dark after it: the resume re-armed the blank
