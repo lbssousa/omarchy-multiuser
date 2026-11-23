@@ -352,6 +352,12 @@ Item {
     if (fingerprintPaused && !fingerprintOnScreenCheck.running) fingerprintOnScreenCheck.running = true
   }
 
+  // The wake sets the displays' brightness, which belong to whoever is using
+  // the machine: behind the login screen it would light theirs.
+  function wakeIfOnScreen() {
+    if (!resumeWakeCheck.running) resumeWakeCheck.running = true
+  }
+
   function resumeFingerprint() {
     if (!fingerprintPaused) return
     fingerprintPaused = false
@@ -366,9 +372,9 @@ Item {
     if (lockRequested && fingerprintConfigured && !fingerprintAuthenticating) fingerprintRetryTimer.restart()
   }
 
-  // A resume can light the panel with no input to wake the lock, so after a
-  // lock request the reader comes back once a sleep is seen; the blank
-  // countdown then pauses it again if nothing else happens. The idle service
+  // A resume brings no input to wake the lock, so after a lock request the
+  // panel and the reader come back once a sleep is seen; the blank countdown
+  // then takes both away again if nothing else happens. The idle service
   // repeats the same request without sleeping, so the sleep has to be seen.
   function noteSleepRequested() {
     if (!lockRequested || !fingerprintPaused) return
@@ -769,6 +775,9 @@ Item {
       if (slept && root.lockRequested && root.fingerprintPaused) {
         stop()
         root.fingerprintSleptWhilePaused = true
+        // A panel blanked before the sleep stays dark through the resume, and
+        // opening the lid is no input that would light it (Omarchy eb7cfd015).
+        root.wakeIfOnScreen()
         root.resumeFingerprintIfOnScreen()
         root.armBlankTimer(idleBlankTimer.resumeMs)
       } else if (slept || !root.fingerprintPaused || --ticksLeft <= 0) {
@@ -974,6 +983,16 @@ Item {
     command: ["bash", "-c", "omarchy-mu-lock-action session-active"]
     onExited: function(exitCode) {
       if (!LockActions.isBackgroundAnswer(exitCode)) root.resumeFingerprint()
+    }
+  }
+
+  Process {
+    id: resumeWakeCheck
+    command: ["bash", "-c", "omarchy-mu-lock-action session-active"]
+    onExited: function(exitCode) {
+      if (LockActions.isBackgroundAnswer(exitCode)) return
+      root.displayBlanked = false
+      if (!wakeProcess.running) wakeProcess.running = true
     }
   }
 

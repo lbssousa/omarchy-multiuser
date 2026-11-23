@@ -87,7 +87,10 @@ auth       required                    pam_faillock.so authsucc
 account    include                     system-local-login
 PAM
 
-# Resume recovery goes with fingerprint PAM, as upstream does.
+# Resume recovery goes with fingerprint PAM, as upstream does, and never one
+# without the other: the PAM service is written first (a failure there stops
+# before the hook), and a hook or drop-in that can't be installed takes the
+# PAM service back out (omacom/omarchy#19845).
 resume_hook_src="$OMARCHY_PATH/default/systemd/system-sleep/fprintd-resume"
 resume_hook_dst=$OMU_ROOT/usr/lib/systemd/system-sleep/fprintd-resume
 stop_timeout_src="$OMARCHY_PATH/default/systemd/system/fprintd.service.d/10-stop-timeout.conf"
@@ -97,26 +100,38 @@ reload_systemd() {
   [[ -n $OMU_ROOT ]] || systemctl daemon-reload
 }
 
-if any_user_has_prints; then
-  say "Configuring lock screen fingerprint authentication..."
+# Called from an `if`, where set -e doesn't apply: every step says so itself.
+install_resume_recovery() {
   if [[ -f $resume_hook_src ]] && ! cmp -s "$resume_hook_src" "$resume_hook_dst"; then
-    install -Dm755 "$resume_hook_src" "$resume_hook_dst"
+    install -Dm755 "$resume_hook_src" "$resume_hook_dst" || return 1
   fi
   if [[ -f $stop_timeout_src ]] && ! cmp -s "$stop_timeout_src" "$stop_timeout_dst"; then
-    install -Dm644 "$stop_timeout_src" "$stop_timeout_dst"
-    reload_systemd
+    install -Dm644 "$stop_timeout_src" "$stop_timeout_dst" || return 1
+    reload_systemd || return 1
   fi
-  write_if_changed "$pam_dir/omarchy-lock-fingerprint" <<'PAM'
-#%PAM-1.0
-auth       required                    pam_fprintd.so
-account    include                     system-local-login
-PAM
-else
-  say "No user has enrolled fingerprints; lock screen uses the password only."
+}
+
+remove_fingerprint_lock() {
   rm -f "$pam_dir/omarchy-lock-fingerprint" "$resume_hook_dst"
   if [[ -e $stop_timeout_dst ]]; then
     rm -f "$stop_timeout_dst"
     rmdir --ignore-fail-on-non-empty "$(dirname "$stop_timeout_dst")"
     reload_systemd
   fi
+}
+
+if any_user_has_prints; then
+  say "Configuring lock screen fingerprint authentication..."
+  write_if_changed "$pam_dir/omarchy-lock-fingerprint" <<'PAM'
+#%PAM-1.0
+auth       required                    pam_fprintd.so
+account    include                     system-local-login
+PAM
+  if ! install_resume_recovery; then
+    remove_fingerprint_lock
+    omu_die "Could not install fprintd's resume recovery; fingerprint unlock stays off until this runs again."
+  fi
+else
+  say "No user has enrolled fingerprints; lock screen uses the password only."
+  remove_fingerprint_lock
 fi

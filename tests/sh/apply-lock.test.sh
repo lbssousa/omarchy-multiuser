@@ -60,4 +60,27 @@ test_unchanged_files_are_not_rewritten() {
   assert_eq "$(stat -c %i "$T/etc/pam.d/omarchy-lock-fingerprint")" "$before" "rewritten (would retrigger the path unit)"
 }
 
+# omacom/omarchy#19845: a failed PAM write left the resume hook and the
+# stop-timeout drop-in behind with no fingerprint PAM service.
+test_failed_pam_write_installs_no_resume_recovery() {
+  setup_tree
+  enroll bob
+  mkdir -p "$T/etc/pam.d/omarchy-lock-fingerprint/busy"   # mv -T can't replace it
+  omarchy-mu-apply-lock --quiet 2>/dev/null && fail "succeeded despite the PAM write failing"
+  assert_no_file "$T/usr/lib/systemd/system-sleep/fprintd-resume"
+  assert_no_file "$T/etc/systemd/system/fprintd.service.d/10-stop-timeout.conf"
+}
+
+test_failed_resume_hook_takes_pam_back_out() {
+  setup_tree
+  enroll bob
+  mkdir -p "$T/usr/lib/systemd/system-sleep"
+  chmod 555 "$T/usr/lib/systemd/system-sleep"
+  omarchy-mu-apply-lock --quiet 2>/dev/null && fail "succeeded despite the hook install failing"
+  chmod 755 "$T/usr/lib/systemd/system-sleep"
+  assert_no_file "$T/etc/pam.d/omarchy-lock-fingerprint"
+  assert_no_file "$T/usr/lib/systemd/system-sleep/fprintd-resume"
+  assert_no_file "$T/etc/systemd/system/fprintd.service.d/10-stop-timeout.conf"
+}
+
 run_tests
