@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **The lock screen lights the panel again after a resume.** A lock that blanked
+  the panel before a suspend stayed dark after it: the resume re-armed the blank
+  countdown but never woke the display, and opening the lid is no input that
+  lights it (Omarchy eb7cfd015, not released yet). Here the wake runs only while
+  the session is the one on screen, so a resume never lights the panel from
+  behind another user's session.
+- **Fingerprint unlock is never left half-configured.** `omarchy-mu-apply-lock`
+  installed fprintd's resume hook and stop-timeout drop-in before writing the
+  fingerprint PAM service, so a failed write left the two behind without it
+  (omacom/omarchy#19845, which upstream's `omarchy-apply-lock` still has). The
+  PAM service is written first now, and a hook or drop-in that can't be installed
+  takes it back out.
+
 ## 0.14.0 (2026-11-23)
 
 - **Setting up the fingerprint reader no longer replaces a custom libfprint.** With
