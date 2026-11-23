@@ -6,6 +6,10 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 export PATH="$REPO/bin:$PATH"
 export OMU_SHARE=$REPO/share
+# The language Omarchy shows comes from ~/.config/omarchy/language; tests that
+# don't pin one expect the default (English), not the language of whoever runs
+# them. A test that needs one still sets OMARCHY_LANGUAGE_FILE for its command.
+export OMARCHY_LANGUAGE_FILE=/nonexistent/omarchy-language
 pass=0 fail=0
 
 fail() { echo "    $*" >&2; exit 1; }
