@@ -332,14 +332,22 @@ Item {
     idleBlankTimer.restart()
   }
 
+  function blankTimerRemainingMs() {
+    return idleBlankTimer.armedAt + idleBlankTimer.interval - Date.now()
+  }
+
   function runWake() {
     // A panel the lock turned off takes seconds to light again (a DisplayPort
     // monitor about five, omacom/omarchy#19946): the short run-up would end
     // just as the picture appears.
+    // Nor does input cut a longer run-up short: the pointer the lock surface
+    // appears under reports itself at once, which would take the lock that
+    // comes up with the session back to five seconds.
     var wasBlanked = displayBlanked
     displayBlanked = false
     if (!wakeProcess.running) wakeProcess.running = true
-    if (lockRequested) armBlankTimer(wasBlanked ? idleBlankTimer.lightUpMs : 0)
+    var runUpMs = wasBlanked ? idleBlankTimer.lightUpMs : idleBlankTimer.idleMs
+    if (lockRequested && !(idleBlankTimer.running && blankTimerRemainingMs() > runUpMs)) armBlankTimer(runUpMs)
     resumeFingerprint()
     nudgeFingerprint()
   }
