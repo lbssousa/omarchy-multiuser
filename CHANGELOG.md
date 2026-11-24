@@ -9,6 +9,13 @@
   The first answer settles the attempt and the other is ignored, as are answers
   to an attempt the lock already dropped; a dismissed lock also lets go of the
   typed password (Omarchy 2f5ef897e, not released yet).
+- **The lock screen no longer goes dark as soon as it appears.** After a wake of
+  a panel the lock had turned off, the five seconds before it blanks again ran
+  while the monitor was still lighting up (about five seconds on DisplayPort),
+  so the picture vanished as it appeared (omacom/omarchy#19946, open upstream).
+  A panel lighting up now gets the 15 seconds a resume already had: after such
+  a wake, on a display that just arrived, and for the lock that comes up in the
+  first 30 seconds of the session.
 
 ## 0.14.1 (2026-11-23)
 

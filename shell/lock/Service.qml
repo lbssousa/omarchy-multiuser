@@ -46,6 +46,9 @@ Item {
   property int fingerprintRetryBackoffMs: 0
   // Outputs the lock last saw, so only a display arriving counts as a wake.
   property int knownScreenCount: 0
+  // When the shell started: a lock soon after is the one that comes up with
+  // the session, on a panel still lighting up.
+  readonly property double startedAtMs: Date.now()
   property bool previewVisible: false
   property string enteredPassword: ""
   property string pendingPassword: ""
@@ -301,7 +304,9 @@ Item {
 
     resetAuthenticationState()
     lockRequested = true
-    armBlankTimer()
+    // The lock that comes up with the session (boot, login) appears while the
+    // panel is still lighting up from the modeset.
+    armBlankTimer(Date.now() - startedAtMs < idleBlankTimer.startupWindowMs ? idleBlankTimer.lightUpMs : 0)
     logEvent("lock-requested")
     queueSessionLock()
 
@@ -334,10 +339,22 @@ Item {
     idleBlankTimer.restart()
   }
 
+  function blankTimerRemainingMs() {
+    return idleBlankTimer.armedAt + idleBlankTimer.interval - Date.now()
+  }
+
   function runWake() {
+    // A panel the lock turned off takes seconds to light again (a DisplayPort
+    // monitor about five, omacom/omarchy#19946): the short run-up would end
+    // just as the picture appears.
+    // Nor does input cut a longer run-up short: the pointer the lock surface
+    // appears under reports itself at once, which would take the lock that
+    // comes up with the session back to five seconds.
+    var wasBlanked = displayBlanked
     displayBlanked = false
     if (!wakeProcess.running) wakeProcess.running = true
-    if (lockRequested) armBlankTimer()
+    var runUpMs = wasBlanked ? idleBlankTimer.lightUpMs : idleBlankTimer.idleMs
+    if (lockRequested && !(idleBlankTimer.running && blankTimerRemainingMs() > runUpMs)) armBlankTimer(runUpMs)
     resumeFingerprint()
     nudgeFingerprint()
   }
@@ -797,7 +814,7 @@ Item {
         // opening the lid is no input that would light it (Omarchy eb7cfd015).
         root.wakeIfOnScreen()
         root.resumeFingerprintIfOnScreen()
-        root.armBlankTimer(idleBlankTimer.resumeMs)
+        root.armBlankTimer(idleBlankTimer.lightUpMs)
       } else if (slept || !root.fingerprintPaused || --ticksLeft <= 0) {
         stop()
       }
@@ -1037,10 +1054,14 @@ Item {
   Timer {
     id: idleBlankTimer
     readonly property int idleMs: 5000
-    // A resume reaches this as soon as the kernel thaws, seconds before the
-    // panel lights (on NVIDIA it waits out a VT switch and a modeset), so the
+    // For a panel that is still lighting up: after a resume, which reaches
+    // this as soon as the kernel thaws (on NVIDIA it waits out a VT switch and
+    // a modeset), after a wake of a panel the lock turned off, on a display
+    // that just arrived, and for the lock that comes up with the session. The
     // idle run-up blanked the lock just as it appeared.
-    readonly property int resumeMs: 15000
+    readonly property int lightUpMs: 15000
+    // How long after the shell starts a lock still counts as the session's own.
+    readonly property int startupWindowMs: 30000
     interval: idleMs
     repeat: false
     property double armedAt: 0
@@ -1049,7 +1070,7 @@ Item {
       // blank the freshly woken unlock screen under the user. Wall-clock time
       // exposes the gap: take a fresh run-up instead of blanking.
       if (Date.now() - armedAt > interval + 2000) {
-        root.armBlankTimer(resumeMs)
+        root.armBlankTimer(lightUpMs)
         return
       }
       // Only a password check in flight should hold the display up. The
@@ -1103,7 +1124,7 @@ Item {
       var screens = root.realScreenCount()
       if (screens > root.knownScreenCount) {
         root.resumeFingerprintIfOnScreen()
-        if (root.lockRequested) root.armBlankTimer()
+        if (root.lockRequested) root.armBlankTimer(idleBlankTimer.lightUpMs)
       }
       root.knownScreenCount = screens
       root.requestSessionLock()
