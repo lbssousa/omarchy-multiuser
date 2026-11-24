@@ -49,6 +49,11 @@ Item {
   property bool previewVisible: false
   property string enteredPassword: ""
   property string pendingPassword: ""
+  // passwordPam's onError and onCompleted can both fire for one attempt
+  // (Omarchy 2f5ef897e); the first settles it and the other is ignored. Kept
+  // apart from authenticatingPassword, which here stays on through the
+  // on-screen check and a child account's administrator check.
+  property bool passwordAttemptPending: false
   property string failureMessage: ""
   property int failedAttempts: 0
   property string backgroundPath: ""
@@ -282,6 +287,8 @@ Item {
     fingerprintRetryTimer.stop()
     fingerprintReachTimer.stop()
     fingerprintResumeTimer.stop()
+    // Cleared before the abort, so an answer the abort brings is not taken.
+    passwordAttemptPending = false
     if (passwordPam.active) passwordPam.abort()
     if (fingerprintPam.active) fingerprintPam.abort()
   }
@@ -450,8 +457,10 @@ Item {
     pendingPassword = password
     failureMessage = ""
     authenticatingPassword = true
+    passwordAttemptPending = true
 
     if (!passwordPam.start()) {
+      passwordAttemptPending = false
       handlePasswordFailure()
       return
     }
@@ -464,12 +473,21 @@ Item {
     passwordPam.respond(pendingPassword)
   }
 
+  // True for the first answer to the attempt in flight, false for a second
+  // one or for one that arrives after the attempt was dropped.
+  function settlePasswordAttempt() {
+    if (!passwordAttemptPending) return false
+    passwordAttemptPending = false
+    return true
+  }
+
+  // The typed password goes even when the lock was already dismissed.
   function handlePasswordFailure() {
+    authenticatingPassword = false
+    pendingPassword = ""
     if (!lockRequested) return
 
-    authenticatingPassword = false
     enteredPassword = ""
-    pendingPassword = ""
     failedAttempts += 1
     failureMessage = I18n.t("lock.authenticationFailed").arg(I18n.formatNumber(failedAttempts))
     runWake()
@@ -669,6 +687,7 @@ Item {
     onPamMessage: root.respondToPasswordPrompt()
 
     onCompleted: function(result) {
+      if (!root.settlePasswordAttempt()) return
       var typed = root.pendingPassword
       root.pendingPassword = ""
 
@@ -682,12 +701,11 @@ Item {
         root.checkAdultPassword(typed)
         return
       }
-      root.authenticatingPassword = false
-      if (!root.lockRequested) return
       root.handlePasswordFailure()
     }
 
     onError: function(error) {
+      if (!root.settlePasswordAttempt()) return
       root.handlePasswordFailure()
     }
   }
