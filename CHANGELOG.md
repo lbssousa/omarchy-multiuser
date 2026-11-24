@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.2 (2026-11-24)
 
 - **A wrong password on the lock screen counts once.** PAM can answer one
   attempt with both an error and a completion, and each was taken as a failure:
