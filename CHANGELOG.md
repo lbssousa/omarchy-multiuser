@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A wrong password on the lock screen counts once.** PAM can answer one
+  attempt with both an error and a completion, and each was taken as a failure:
+  the counter went up by two, and on a child account the error reported a
+  failure while the administrator check the completion had started still ran.
+  The first answer settles the attempt and the other is ignored, as are answers
+  to an attempt the lock already dropped; a dismissed lock also lets go of the
+  typed password (Omarchy 2f5ef897e, not released yet).
 - **The lock screen no longer goes dark as soon as it appears.** After a wake of
   a panel the lock had turned off, the five seconds before it blanks again ran
   while the monitor was still lighting up (about five seconds on DisplayPort),
