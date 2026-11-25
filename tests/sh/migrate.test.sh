@@ -160,4 +160,47 @@ test_pending_lists_unmarked() {
   assert_eq "$(omarchy-mu-migrate --pending)" "101.sh"
 }
 
+test_exit_75_defers_without_failing() {
+  setup
+  migration 100 'exit 75'
+  migration 101 'touch "$HOME/ran-101"'
+  omarchy-mu-migrate --quiet
+  assert_eq $? 4
+  assert_no_file "$(marker 100)"
+  assert_no_file "$HOME/ran-101"   # it holds back the rest, as upstream
+  assert_contains "$HOME/.local/state/omarchy-multiuser/migrate.log" "deferred 100.sh (user"
+  # Once what it waited for is there, it runs, and the queue goes on.
+  migration 100 'touch "$HOME/ran-100"'
+  omarchy-mu-migrate --quiet || fail "exit $?"
+  assert_file "$(marker 100)"
+  assert_file "$HOME/ran-101"
+}
+
+test_mixed_exit_75_defers_after_admin() {
+  setup
+  # Like 1795613633: a package, then a wait for the audio session.
+  migration 100 'sudo pacman -S foo
+[[ -e $HOME/session ]] || exit 75
+touch "$HOME/ran-100"'
+  assert_eq "$(classify 100)" mixed
+  register 100
+  omarchy-mu-migrate --quiet
+  assert_eq $? 4
+  assert_no_file "$(marker 100)"
+  assert_contains "$HOME/.local/state/omarchy-multiuser/migrate.log" "deferred 100.sh (mixed"
+  touch "$HOME/session"
+  omarchy-mu-migrate --quiet || fail "exit $?"
+  assert_file "$HOME/ran-100"
+  assert_file "$(marker 100)"
+}
+
+test_shipped_overrides() {
+  setup
+  export OMU_MIGRATION_OVERRIDES=$REPO/share/migrations-overrides.tsv
+  # omarchy-pkg-add (the admin's) and ~/.config/pipewire (each user's).
+  migration 1795613633 'omarchy-pkg-add lsp-plugins-lv2
+omarchy-audio-tuning on'
+  assert_eq "$(classify 1795613633)" mixed
+}
+
 run_tests

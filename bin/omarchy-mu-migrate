@@ -28,12 +28,17 @@
 #
 # Order matters as it does upstream: the first migration that can't run
 # (failed, or waiting for an admin) stops the run, and the next login retries.
+# A migration that exits 75 (EX_TEMPFAIL) is waiting, as upstream's
+# omarchy-migrate has it, for a package that hasn't landed yet or for a
+# graphical or audio session: it stays pending and holds back the rest, but
+# it is no failure.
 # Administrators get upstream's omarchy-migrate unchanged, under the same
 # machine-wide lock as omarchy-mu-update, so two administrators never run one
 # migration at once.
 #
 # Usage: omarchy-mu-migrate [--pending] [--quiet]
-# Exit:  0 nothing pending, 3 waiting for an admin, 1 a migration failed
+# Exit:  0 nothing pending, 3 waiting for an admin, 4 a migration is waiting
+#        for a package or a session (it exited 75), 1 a migration failed
 
 set -uo pipefail
 
@@ -136,6 +141,15 @@ run_migration() {
     bash -euo pipefail "$file" </dev/null
 }
 
+# Exit 75: the migration stays pending and the run stops there, without
+# counting as a failure.
+defer_migration() {
+  local name=$1 class=$2
+  log_line "deferred $name ($class, exit 75: waiting for a package or a session)"
+  say "Migration ${name%.sh} is waiting for a package or a session; it will run again later."
+  exit 4
+}
+
 mkdir -p "$state_dir"
 for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
   [[ -f $file ]] || continue
@@ -150,9 +164,13 @@ for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
   case $class in
     user)
       say "\e[32mRunning migration (${name%.sh})\e[0m"
-      if run_migration "$file" "$shims/strict"; then
+      status=0
+      run_migration "$file" "$shims/strict" || status=$?
+      if (( status == 0 )); then
         touch "$marker"
         log_line "ran $name (user)"
+      elif (( status == 75 )); then
+        defer_migration "$name" user
       else
         log_line "FAILED $name (user)"
         say "\e[31mMigration ${name%.sh} failed; see $log.\e[0m"
@@ -177,13 +195,17 @@ for file in "$OMU_MIGRATIONS_DIR"/*.sh; do
       fi
       say "\e[32mRunning migration (${name%.sh}, your part)\e[0m"
       rm -f "$needs_admin"
-      if run_migration "$file" "$shims/lenient"; then
+      status=0
+      run_migration "$file" "$shims/lenient" || status=$?
+      if (( status == 0 )); then
         touch "$marker"
         log_line "ran $name ($class, privileged part skipped)"
       elif [[ -s $needs_admin ]]; then
         log_line "waiting for an admin: $name ($class, for this account: $(head -1 "$needs_admin"))"
         say "Migration ${name%.sh} needs an administrator to run, for your account: $(head -1 "$needs_admin")"
         exit 3
+      elif (( status == 75 )); then
+        defer_migration "$name" "$class"
       else
         log_line "FAILED $name ($class)"
         say "\e[31mMigration ${name%.sh} failed; see $log.\e[0m"
