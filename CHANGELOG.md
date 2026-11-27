@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 (2026-11-27)
 
 - **A migration that is waiting no longer counts as failed.** Since
   omacom/omarchy#19754, a migration exits 75 to stay pending until a package
