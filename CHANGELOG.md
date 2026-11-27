@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.1 (2026-11-27)
+
+- **The package builds on Omarchy 4.6.** A test of the boot image rebuild
+  expected Limine's `limine-mkinitcpio` with `/usr/bin` on its PATH, but 4.6
+  ships `/usr/bin/omarchy-boot-rebuild`, which is rightly preferred, so
+  `makepkg`'s `check()` failed and nothing was installed. The test now looks
+  only at its own fake commands. Nothing else changes.
+
 ## 0.15.0 (2026-11-27)
 
 - **A migration that is waiting no longer counts as failed.** Since
