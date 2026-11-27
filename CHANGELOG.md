@@ -10,6 +10,27 @@
   the migrations Omarchy added on 2026-11-25 do it). It now keeps the migration
   pending, holds back the ones after it as upstream does, logs it as deferred,
   and exits 4; `omarchy-mu-update` says it will run again later.
+- **Factory reset is for administrators.** Setup > Reset Computer (Omarchy
+  4.5) wipes every account's home, and any user could start it from the menu.
+- **Ready for Omarchy 4.6.** `upstream/` now holds the 4.6.0rc1 files, and
+  the forks carry what changed since 4.5.0:
+  - Update > Password, one entry in 4.6 that re-keys the system disk and then
+    the login (`omarchy-drive-password --login`), changes this person's login
+    and their own key slot with `omarchy-mu-user-password`. In 4.5 it stays a
+    submenu: `omarchy-mu-menu-sync` no longer lets an action override turn an
+    Omarchy submenu into an action.
+  - New machine-wide entries are for administrators: Remove > Factory Reset,
+    Remove > CLI, Remove > Gaming > Moonlight, Setup > Network > Hostname and
+    System > Snapshots; Remove > Dictation also counts Hex.
+  - The admin-gate test checks the block against `upstream/` when no Omarchy
+    is installed (so CI runs it too), and accepts a gate for an entry only the
+    newer snapshot has.
+  - The lock screen blanks again after a bound key such as volume lit it
+    while locked (Omarchy's lock-screen idle monitor).
+  - The fingerprint setup's new full-screen panel, which Omarchy's own menu
+    and first-run invitation open, runs its enrollment as root through
+    pkexec; the per-user setup stays on `omarchy-mu-setup-security-fingerprint`
+    (or fingerprint-omarchy's overlay), which the menu already points at.
 - **The Dell XPS 16 N1x speaker tuning reaches every account.** Migration
   1795613633 installs a package and then writes the tuning to the user's own
   `~/.config/pipewire`; read as machine-wide, it was only marked done for

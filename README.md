@@ -384,7 +384,7 @@ Try the greeter in a window first: `just greeter`.
 
 ## Upstream
 
-`upstream/` holds the Omarchy 4.5.0 files the forks start from, and
+`upstream/` holds the Omarchy 4.6.0rc1 files the forks start from, and
 `upstream/MAP` pairs them. `just diff-base` is what this project changes;
 `just diff-upstream` is what Omarchy changed since. After each Omarchy upgrade
 a pacman hook warns when one of those files moved.

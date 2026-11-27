@@ -94,6 +94,10 @@ perl -CSD -MJSON::PP -e '
     if ($line =~ /^(\s*)"([^"]+)":\s*(\{.*\})(,?)\s*$/ && $upstream{$2}) {
       my ($indent, $id, $body, $comma) = ($1, $2, $3, $4);
       my $entry = $json->decode($body);
+      # An action for an entry this Omarchy has as a submenu (update.password,
+      # an action from 4.6 on) would hide everything under it: left out.
+      next if !exists $entry->{label} && exists $entry->{action} &&
+        !grep { exists $upstream{$id}{$_} } qw(action target provider);
       if (!exists $entry->{label}) {
         my %whole = %{ $upstream{$id} };
         my $local = ref $menu_catalog->{$id} eq "HASH" ? $menu_catalog->{$id} : {};
