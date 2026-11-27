@@ -35,6 +35,7 @@ omarchy-mu-migrate
 case $? in
   0) echo "Your account is up to date." ;;
   3) echo "Some migrations are waiting for an administrator (see the message above)." ;;
+  4) echo "A migration is waiting for a package or a session; it will run again later." ;;
   *) echo "A migration failed; see ~/.local/state/omarchy-multiuser/migrate.log." ;;
 esac
 echo

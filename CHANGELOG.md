@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **A migration that is waiting no longer counts as failed.** Since
+  omacom/omarchy#19754, a migration exits 75 to stay pending until a package
+  lands or a graphical or audio session exists, and `omarchy-migrate` goes on
+  with the update. `omarchy-mu-migrate` took that as a failure, so users outside
+  `wheel` got "A migration failed for your account" at every login (five of
+  the migrations Omarchy added on 2026-11-25 do it). It now keeps the migration
+  pending, holds back the ones after it as upstream does, logs it as deferred,
+  and exits 4; `omarchy-mu-update` says it will run again later.
+- **The Dell XPS 16 N1x speaker tuning reaches every account.** Migration
+  1795613633 installs a package and then writes the tuning to the user's own
+  `~/.config/pipewire`; read as machine-wide, it was only marked done for
+  everyone but the administrator. It is now `mixed`.
+
 ## 0.14.2 (2026-11-24)
 
 - **A wrong password on the lock screen counts once.** PAM can answer one

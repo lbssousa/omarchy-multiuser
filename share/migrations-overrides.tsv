@@ -1,2 +1,6 @@
 # Corrections to the automatic migration classes (lib/omarchy-multiuser/migrations.sh).
 # <migration file name><TAB><user|system|mixed>
+# Speaker tuning for the Dell XPS 16 N1x: the package (omarchy-pkg-add) is the
+# admin's, the tuning (omarchy-audio-tuning on) lives in each user's
+# ~/.config/pipewire and user units.
+1795613633.sh	mixed
