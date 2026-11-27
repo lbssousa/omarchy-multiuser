@@ -24,12 +24,22 @@
   // The login password is also the account's disk key: plain passwd leaves it behind.
   // Changed under Setup › Users, as Omarchy's PR does.
   "update.password.user": {"when":"false"},
+  // Omarchy 4.6 folds Update > Password into one entry that re-keys the system
+  // disk and then the login (omarchy-drive-password --login), as if the disk had
+  // one owner. Here it changes this person's login and their own key slot. In
+  // 4.5 the entry is a submenu, which menu-sync leaves alone.
+  "update.password": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-password"},
   // Removing software drops packages for everyone. What lives in the user's
   // own home (themes, web apps, TUIs, the Windows VM, mise dev envs, Microsoft
   // and Xbox Cloud web apps, the SSH agent) stays theirs.
   "remove.package": {"when":"omarchy-mu-is-admin"},
   "remove.ai": {"when":"omarchy-mu-is-admin"},
-  "remove.dictation": {"when":"omarchy-mu-is-admin && (omarchy-pkg-present voxtype-bin || omarchy-pkg-present superwhisper-bin)"},
+  "remove.dictation": {"when":"omarchy-mu-is-admin && (omarchy-pkg-present voxtype-bin || omarchy-pkg-present superwhisper-bin || omarchy-pkg-present hex-bin)"},
+  "remove.cli": {"when":"omarchy-mu-is-admin"},
+  "remove.gaming.moonlight": {"when":"omarchy-mu-is-admin && omarchy-pkg-present moonlight-qt"},
+  // Wipes the machine, everyone's home included. Setup > Reset Computer in 4.5.
+  "setup.reset": {"when":"omarchy-mu-is-admin && [[ $(findmnt -no FSTYPE /) == btrfs ]]"},
+  "remove.factory-reset": {"when":"omarchy-mu-is-admin && [[ $(findmnt -no FSTYPE /) == btrfs ]]"},
   "remove.browser": {"when":"omarchy-mu-is-admin"},
   "remove.preinstalls": {"when":"omarchy-mu-is-admin && [[ ! -f $HOME/.local/state/omarchy/preinstalls-removed ]]"},
   "remove.service.dropbox": {"when":"omarchy-mu-is-admin && omarchy-pkg-present dropbox"},
@@ -45,7 +55,10 @@
   "remove.development.php.symfony": {"when":"omarchy-mu-is-admin && omarchy-pkg-present symfony-cli"},
   "remove.development.ocaml": {"when":"omarchy-mu-is-admin && [[ -d $HOME/.opam ]]"},
   // The machine's clock, time zone, release channel, boot kernel, firmware,
-  // boot splash and trackpad driver.
+  // boot splash, trackpad driver, hostname and boot snapshots.
+  "setup.network.hostname": {"when":"omarchy-mu-is-admin"},
+  "system.snapshots": {"when":"omarchy-mu-is-admin && [[ $(omarchy-boot-backend) == systemd-boot ]] && [[ -n $(omarchy-snapshot list) ]]"},
+  "system.snapshots.restore": {"when":"omarchy-mu-is-admin && grep -q '/[.]snapshots/[0-9]*/snapshot' /proc/cmdline && [[ $(omarchy-boot-backend) == systemd-boot ]]"},
   "update.channel": {"when":"omarchy-mu-is-admin"},
   "update.kernel": {"when":"omarchy-mu-is-admin && (( $(omarchy-kernel list | wc -l) > 1 ))"},
   "update.firmware": {"when":"omarchy-mu-is-admin"},

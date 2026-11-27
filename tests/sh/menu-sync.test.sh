@@ -39,20 +39,27 @@ test_creates_missing_file() {
 }
 
 # An admin gate replaces the entry's own `when`, so it must carry Omarchy's
-# condition along, and the entry must still exist upstream.
+# condition along, and the entry must still exist upstream: in the installed
+# Omarchy's menu, or in the snapshot's (upstream/) when it is from a newer
+# release, or the snapshot's alone when no Omarchy is installed.
 test_admin_gates_keep_upstream_conditions() {
+  local snapshot=$REPO/upstream/default/omarchy/omarchy-menu.jsonc
   local menu=${OMU_UPSTREAM_MENU:-/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc}
-  [[ -f $menu ]] || { echo "    (no installed Omarchy menu; skipped)"; return 0; }
+  [[ -f $menu ]] || menu=$snapshot
   # shellcheck disable=SC2016  # JavaScript, not shell
   node -e '
     const fs = require("fs")
     const parse = f => JSON.parse(fs.readFileSync(f, "utf8").split("\n")
       .filter(l => !/^\s*\/\//.test(l)).join("\n").replace(/,(\s*})/g, "$1"))
-    const upstream = parse(process.argv[1])
+    const installed = parse(process.argv[1])
+    const snapshot = parse(process.argv[3])
     const block = parse(process.argv[2])
+    // A gate for an entry only the snapshot has is checked against it.
+    const upstream = Object.assign({}, snapshot, installed)
     // Entries Omarchy renamed: the block gates both ids, for older and newer
     // releases, and menu-sync leaves out the one the installed menu lacks.
-    const renamed = { "update.timezone": "setup.region.timezone" }
+    const renamed = { "update.timezone": "setup.region.timezone", "update.password.drive": "update.password",
+      "setup.reset": "remove.factory-reset" }
     for (const pair of Object.entries(renamed)) {
       if (!pair.some(id => upstream[id])) continue
       for (const id of pair) if (!upstream[id]) delete block[id]
@@ -62,12 +69,17 @@ test_admin_gates_keep_upstream_conditions() {
       const m = /^omarchy-mu-is-admin(?: && (.*))?$/.exec(entry.when || "")
       if (!m || entry.label) continue
       if (!upstream[id]) { bad.push(id + ": gone upstream"); continue }
-      let want = upstream[id].when, got = m[1]
-      if (got && /\|\|/.test(want || "")) got = got.replace(/^\((.*)\)$/, "$1")
-      if ((want || undefined) !== got) bad.push(id + ": upstream when is " + JSON.stringify(want))
+      // The condition of the installed release, or the newer one of the snapshot.
+      const wants = [upstream[id].when, snapshot[id] && snapshot[id].when]
+      const matches = wants.some(want => {
+        let got = m[1]
+        if (got && /\|\|/.test(want || "")) got = got.replace(/^\((.*)\)$/, "$1")
+        return (want || undefined) === got
+      })
+      if (!matches) bad.push(id + ": upstream when is " + JSON.stringify(upstream[id].when))
     }
     if (bad.length) { console.error(bad.join("\n")); process.exit(1) }
-  ' "$menu" <(printf '{\n%s\n}\n' "$(cat "$REPO/share/menu-block.jsonc")") || fail "admin gates out of date"
+  ' "$menu" <(printf '{\n%s\n}\n' "$(cat "$REPO/share/menu-block.jsonc")") "$snapshot" || fail "admin gates out of date"
 }
 
 test_english_without_language_file() {
@@ -157,6 +169,26 @@ test_leaves_out_overrides_of_missing_entries() {
   omarchy-mu-menu-sync "$T/menu.jsonc"
   assert_contains "$T/menu.jsonc" '"update.timezone": {"action":"stock","icon":"T","label":"Timezone","when":"omarchy-mu-is-admin"},'
   assert_not_contains "$T/menu.jsonc" '"setup.region.timezone"'
+}
+
+# update.password is a submenu in 4.5 and an action from 4.6 on: the block's
+# action replaces only the latter, or it would hide the submenu's entries.
+test_action_overrides_leave_submenus_alone() {
+  fake_upstream
+  cat >"$T/upstream.jsonc" <<'JSON'
+{
+  "update.password": {"icon":"P","label":"Password"},
+  "update.password.drive": {"icon":"D","label":"Drive Encryption","action":"stock"},
+}
+JSON
+  omarchy-mu-menu-sync "$T/menu.jsonc"
+  valid_jsonc "$T/menu.jsonc"
+  assert_not_contains "$T/menu.jsonc" '"update.password": {'
+  assert_contains "$T/menu.jsonc" '"update.password.drive": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-drive-password","icon":"D","label":"Drive Encryption","when":"omarchy-mu-is-admin"},'
+  printf '{\n  "update.password": {"icon":"P","label":"Password","action":"stock"},\n}\n' >"$T/upstream.jsonc"
+  omarchy-mu-menu-sync "$T/menu.jsonc"
+  assert_contains "$T/menu.jsonc" '"update.password": {"action":"omarchy-launch-floating-terminal-with-presentation omarchy-mu-user-password","icon":"P","label":"Password"},'
+  assert_not_contains "$T/menu.jsonc" '"update.password.drive"'
 }
 
 test_overrides_are_written_whole() {
