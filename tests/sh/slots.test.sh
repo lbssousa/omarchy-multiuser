@@ -96,17 +96,18 @@ test_the_boot_image_is_rebuilt_with_omarchys_command_when_there_is_one() {
     source "$(dirname "$0")/../../lib/omarchy-multiuser/common.sh"
     source "$(dirname "$0")/../../lib/omarchy-multiuser/slots.sh"
     unset OMU_REBUILD_BOOT
-    PATH=$bin:/usr/bin:/bin
+    # Only the fake bin on PATH: the machine running the tests may have any of
+    # the three (Omarchy 4.6 ships omarchy-boot-rebuild in /usr/bin).
+    # command -v, printf and the assertions are builtins; chmod goes by path.
+    PATH=$bin
     hash -r
-    if ! command -v mkinitcpio >/dev/null && ! command -v limine-mkinitcpio >/dev/null; then
-      assert_eq "$(omu_rebuild_boot_command)" "mkinitcpio -P"
-    fi
+    assert_eq "$(omu_rebuild_boot_command)" "mkinitcpio -P"
     printf '#!/bin/sh\n' >"$bin/limine-mkinitcpio"
-    chmod +x "$bin/limine-mkinitcpio"
+    /usr/bin/chmod +x "$bin/limine-mkinitcpio"
     hash -r
     assert_eq "$(omu_rebuild_boot_command)" limine-mkinitcpio
     printf '#!/bin/sh\n' >"$bin/omarchy-boot-rebuild"
-    chmod +x "$bin/omarchy-boot-rebuild"
+    /usr/bin/chmod +x "$bin/omarchy-boot-rebuild"
     hash -r
     assert_eq "$(omu_rebuild_boot_command)" omarchy-boot-rebuild
     OMU_REBUILD_BOOT=$bin/limine-mkinitcpio
